@@ -1,0 +1,105 @@
+# ---------------------------------------------------------------------------
+# Organizational Knowledge — Layer 2 OWL triples (human-authored)
+# ---------------------------------------------------------------------------
+#
+# These rules encode tacit engineering knowledge that doesn't appear in any
+# document: compatibility constraints, inspection dependencies, safety
+# requirements, supersession rules, etc.
+#
+# HOW TO USE
+# ----------
+#   1. Copy (or rename) this file to  data/org_knowledge.yaml
+#   2. Edit the rules section below
+#   3. Apply to your working OWL graph:
+#
+#        python scripts/apply_org_knowledge.py \
+#            --yaml data/org_knowledge.yaml \
+#            --owl  data/ontology/working.ttl
+#
+#   4. Run Arm B of the evaluator — it will pick up these triples alongside
+#      the pipeline-extracted knowledge.
+#
+# YAML SCHEMA
+# -----------
+#   namespace:   default IRI prefix for bare local names (no http://, no colon)
+#   predicates:  optional shorthand aliases  →  full IRI
+#   rules:       list of triples
+#     - id:        unique string (e.g. "org-001")  — required
+#       subject:   local name, alias, or full IRI  — required
+#       predicate: local name, alias, or full IRI  — required
+#       object:    local name, alias, or full IRI  — required
+#       note:      human-readable rationale         — optional
+#       datatype:  XSD IRI for literal objects      — optional
+#                  (e.g. "http://www.w3.org/2001/XMLSchema#float")
+# ---------------------------------------------------------------------------
+
+namespace: "http://example.org/aerospace#"
+
+# Define short aliases for predicates you use repeatedly.
+# Remove or leave empty if you prefer to write full IRIs directly.
+predicates:
+    notCompatibleWith:    "http://example.org/aerospace#notCompatibleWith"
+    requiresInspectionOf: "http://example.org/aerospace#requiresInspectionOf"
+    supersedes:           "http://example.org/aerospace#supersedes"
+    hasSafetyConstraint:  "http://example.org/aerospace#hasSafetyConstraint"
+    triggersReviewOf:     "http://example.org/aerospace#triggersReviewOf"
+
+rules:
+    # ── Compatibility constraints ────────────────────────────────────────────
+    - id: "org-001"
+      subject:   "ThrusterModule_A"
+      predicate: "notCompatibleWith"
+      object:    "PropellantTank_B"
+      note: >
+          ThrusterModule_A is rated for MON-3/MMH propellant only.
+          PropellantTank_B was designed for NTO at a higher operating pressure.
+          Using them together creates a pressure mismatch and seal degradation risk.
+
+    # ── Inspection / re-analysis dependencies ────────────────────────────────
+    - id: "org-002"
+      subject:   "FeedSystem_A"
+      predicate: "requiresInspectionOf"
+      object:    "ThrusterModule_A"
+      note: >
+          Any change to ThrusterModule_A dry mass (>5%) requires a full
+          feed system flow-rate recalculation to ensure margin is maintained.
+
+    # ── Change triggers downstream review ────────────────────────────────────
+    - id: "org-003"
+      subject:   "ThrusterModule_A"
+      predicate: "triggersReviewOf"
+      object:    "FeedSystem_A"
+      note: >
+          Per SES-112 change control policy, thruster modifications must
+          trigger a Level-2 review of the feed system before PDR close-out.
+
+    # ── Safety constraints ───────────────────────────────────────────────────
+    - id: "org-004"
+      subject:   "ThrusterModule_A"
+      predicate: "hasSafetyConstraint"
+      object:    "PropellantTank_A"
+      note: >
+          Per safety review SR-42, ThrusterModule_A must always be paired
+          with a tank that has been pressure-cycled at least 3 times before
+          integration. This is not documented in any PDR deliverable.
+
+    # ── Supersession rules ───────────────────────────────────────────────────
+    - id: "org-005"
+      subject:   "ThrusterModule_B"
+      predicate: "supersedes"
+      object:    "ThrusterModule_A"
+      note: >
+          ThrusterModule_B replaces ThrusterModule_A in all new designs
+          from Rev-D baseline onward. Existing designs using ThrusterModule_A
+          require a heritage review before the upgrade can be approved.
+
+    # ── Literal-valued rule example ──────────────────────────────────────────
+    # Use `datatype` when the object is a data value rather than a component IRI.
+    - id: "org-006"
+      subject:   "ThrusterModule_A"
+      predicate: "http://example.org/aerospace#maxOperatingCycles"
+      object:    "5000"
+      datatype:  "http://www.w3.org/2001/XMLSchema#integer"
+      note: >
+          Organizational life-limit: ThrusterModule_A must be retired after
+          5000 cumulative firing cycles per reliability board decision RB-2024-07.

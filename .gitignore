@@ -1,0 +1,40 @@
+# Virtual environment
+.venv/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Generated pipeline artifacts (large / run-specific — not committed)
+data/artifacts/
+data/extractions/
+data/deltas/
+data/alignments/
+data/synthesized/
+data/ontology/working/
+data/ontology/working.owl
+data/ontology/changelog/
+data/ontology/base/
+
+# Raw documents (large binaries)
+data/raw/*.pdf
+data/raw/*.docx
+
+# Converted Markdown (reproducible from source)
+data/raw/*.md
+
+# Script output
+scripts/output/
+
+# IDE
+.vscode/
+.idea/
