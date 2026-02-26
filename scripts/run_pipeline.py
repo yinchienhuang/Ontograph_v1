@@ -438,84 +438,180 @@ def step_write_owl(
 # Step 6 — Compare (--from-owl mode only)
 # ---------------------------------------------------------------------------
 
-def step_compare(source_owl: Path, working_owl: Path, tbox_path: Path | None) -> None:
-    """Compare the source OWL against the newly built working OWL."""
-    from ontograph.utils import owl as owl_utils
+def step_compare(source_owl: Path, working_owl: Path) -> None:
+    """Compare the source OWL against the newly built working OWL via the Evaluator."""
+    from ontograph.evaluator import evaluate
 
     _section("Step 6 — Comparison: source OWL vs working OWL")
 
-    src_g     = owl_utils.load_graph(source_owl, fmt="xml")
-    working_g = owl_utils.load_graph(working_owl, fmt="xml")
+    report = evaluate(source_owl, working_owl, fmt="xml")
+    m_ind = report.individuals
+    m_tri = report.triples
 
-    # Identify individuals in source (same logic as owl_to_delta)
-    from rdflib import BNode, URIRef
-    from rdflib.namespace import OWL, RDF
-    from ontograph.utils.owl import _SCHEMA_TYPES
+    def _pct(v: float) -> str:
+        return f"{v * 100:.1f}%"
 
-    def _individuals(g) -> set[str]:
-        schema_subjects: set[URIRef] = set()
-        for st in _SCHEMA_TYPES:
-            for s in g.subjects(RDF.type, st):
-                if not isinstance(s, BNode):
-                    schema_subjects.add(s)
-        inds: set[str] = set()
-        for s in g.subjects(RDF.type, OWL.NamedIndividual):
-            if not isinstance(s, BNode):
-                inds.add(str(s))
-        for s, _p, o in g.triples((None, RDF.type, None)):
-            if isinstance(s, BNode) or isinstance(o, BNode):
-                continue
-            if s in schema_subjects:
-                continue
-            if o not in _SCHEMA_TYPES:
-                inds.add(str(s))
-        return inds
+    def _color_count(val: int, good: bool = True) -> str:
+        if val == 0:
+            return "[dim]0[/dim]"
+        color = "green" if good else "yellow"
+        return f"[{color}]{val}[/{color}]"
 
-    src_individuals = _individuals(src_g)
-    wrk_individuals = _individuals(working_g)
+    table = Table(box=box.SIMPLE, show_header=True)
+    table.add_column("Metric",          style="bold")
+    table.add_column("Individuals",     justify="right")
+    table.add_column("Triples",         justify="right")
 
-    # Count ABox triples (exclude TBox if tbox_path given)
-    tbox_triples: set = set()
-    if tbox_path:
-        from rdflib import Graph
-        tmp = Graph()
-        tmp.parse(str(tbox_path), format="xml")
-        tbox_triples = set(tmp)
-
-    def _abox_triples(g) -> int:
-        return sum(1 for t in g if t not in tbox_triples)
-
-    recovered  = src_individuals & wrk_individuals
-    missed     = src_individuals - wrk_individuals
-    extra      = wrk_individuals - src_individuals
-    recall_pct = 100 * len(recovered) / len(src_individuals) if src_individuals else 0.0
-
-    table = Table(box=box.SIMPLE, show_header=False)
-    table.add_column("Metric", style="bold")
-    table.add_column("Value",  justify="right")
-
-    table.add_row("Source OWL individuals",        f"[cyan]{len(src_individuals)}[/cyan]")
-    table.add_row("Working OWL individuals",        f"[cyan]{len(wrk_individuals)}[/cyan]")
-    table.add_row("Recovered (in both)",            f"[green]{len(recovered)}[/green]")
-    table.add_row("Missed (in source only)",        f"[yellow]{len(missed)}[/yellow]")
-    table.add_row("Extra (in working only)",        f"[dim]{len(extra)}[/dim]")
-    table.add_row("Individual recall",              f"[bold]{recall_pct:.1f}%[/bold]")
-    table.add_row("Source ABox triples",            f"[cyan]{_abox_triples(src_g)}[/cyan]")
-    table.add_row("Working ABox triples",           f"[cyan]{_abox_triples(working_g)}[/cyan]")
+    table.add_row("Source count",       f"[cyan]{m_ind.source_count}[/cyan]",   f"[cyan]{m_tri.source_count}[/cyan]")
+    table.add_row("Working count",      f"[cyan]{m_ind.working_count}[/cyan]",  f"[cyan]{m_tri.working_count}[/cyan]")
+    table.add_row("Recovered",          _color_count(m_ind.recovered_count),    _color_count(m_tri.recovered_count))
+    table.add_row("Missed",             _color_count(m_ind.missed_count, False), _color_count(m_tri.missed_count, False))
+    table.add_row("Extra (invented)",   _color_count(m_ind.extra_count,  False), _color_count(m_tri.extra_count,  False))
+    table.add_row("Recall",             f"[bold]{_pct(m_ind.recall)}[/bold]",   f"[bold]{_pct(m_tri.recall)}[/bold]")
+    table.add_row("Precision",          f"[bold]{_pct(m_ind.precision)}[/bold]",f"[bold]{_pct(m_tri.precision)}[/bold]")
+    table.add_row("F1",                 f"[bold]{_pct(m_ind.f1)}[/bold]",       f"[bold]{_pct(m_tri.f1)}[/bold]")
 
     console.print(table)
 
-    if missed:
+    if report.missed_individuals:
         console.print("[yellow]Missed individuals:[/yellow]")
-        for iri in sorted(missed):
+        for iri in report.missed_individuals:
             local = iri.rsplit("#", 1)[-1] if "#" in iri else iri.rsplit("/", 1)[-1]
             console.print(f"  [dim]{local}[/dim]")
 
-    if extra:
+    if report.extra_individuals:
         console.print("[dim]Extra individuals (LLM invented):[/dim]")
-        for iri in sorted(extra):
+        for iri in report.extra_individuals:
             local = iri.rsplit("#", 1)[-1] if "#" in iri else iri.rsplit("/", 1)[-1]
             console.print(f"  [dim]{local}[/dim]")
+
+    # Save evaluation report to disk
+    eval_dir = DATA / "evaluations"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    eval_path = eval_dir / f"{report.id}_eval.json"
+    eval_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    _generated("Evaluation report", eval_path)
+
+
+# ---------------------------------------------------------------------------
+# Step 7 — Check rules (optional, when --rules is provided)
+# ---------------------------------------------------------------------------
+
+def step_check_rules(
+    rules_path: Path,
+    owl_path: Path | None,
+    doc_path: Path | None,
+    provider,
+    mode: str,
+) -> None:
+    """Run LLM rule violation checker and print results."""
+    from ontograph.rules import (
+        load_rules,
+        generate_all_plain_english,
+        check_rules,
+    )
+
+    _section("Step 7 — Rule Violation Check")
+
+    rules = load_rules(rules_path)
+    console.print(
+        f"  Rules file : [dim]{rules_path.name}[/dim]  "
+        f"[cyan]{len(rules)}[/cyan] rule(s)  mode=[cyan]{mode}[/cyan]"
+    )
+
+    # Generate plain-English descriptions for document/both modes
+    if mode in ("document", "both"):
+        console.print("  Generating vague plain-English descriptions…")
+        rules = generate_all_plain_english(rules, provider)
+
+    report = check_rules(
+        rules=rules,
+        provider=provider,
+        working_owl=owl_path,
+        document_path=doc_path,
+        mode=mode,
+    )
+
+    actual = report.critical()
+    console.print(
+        f"  Pairs evaluated : [cyan]{len(report.violations)}[/cyan]\n"
+        f"  Violations found: "
+        + (f"[red bold]{len(actual)}[/red bold]" if actual else "[green]0[/green]")
+    )
+
+    for vi in actual:
+        sev_color = {"critical": "red", "warning": "yellow", "info": "cyan"}.get(vi.severity, "white")
+        obj_part = f" ↔ {vi.object_label}" if vi.object_label else ""
+        console.print(
+            f"  [{sev_color}]{vi.rule_id}[/{sev_color}]  "
+            f"[{sev_color}]{vi.severity}[/{sev_color}]  "
+            f"[dim]({vi.mode})[/dim]  "
+            f"{vi.subject_label}{obj_part}  "
+            f"conf={vi.confidence:.2f}"
+        )
+
+    viol_dir = DATA / "violations"
+    viol_dir.mkdir(parents=True, exist_ok=True)
+    viol_path = viol_dir / f"{report.id}_violations.json"
+    viol_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    _generated("Violation report", viol_path)
+
+
+# ---------------------------------------------------------------------------
+# Step 8 — Impact analysis (optional, when --impact is provided)
+# ---------------------------------------------------------------------------
+
+def step_analyze_impact(
+    scenarios_path: Path,
+    rules_path: Path,
+    owl_path: Path,
+    doc_path: Path | None,
+    provider,
+    mode: str,
+) -> None:
+    """Run design-change impact analysis and print per-scenario P/R/F1 results."""
+    from ontograph.impact import load_scenarios, analyze_impact
+    from ontograph.rules import load_rules, generate_all_plain_english
+
+    _section("Step 8 — Impact Analysis")
+
+    namespace, scenarios = load_scenarios(scenarios_path)
+    console.print(
+        f"  Scenarios : [dim]{scenarios_path.name}[/dim]  "
+        f"[cyan]{len(scenarios)}[/cyan] scenario(s)  mode=[cyan]{mode}[/cyan]"
+    )
+
+    rules = load_rules(rules_path)
+
+    if mode in ("document", "both"):
+        console.print("  Generating vague plain-English descriptions…")
+        rules = generate_all_plain_english(rules, provider)
+
+    eval_dir = DATA / "evaluations"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+
+    for scenario in scenarios:
+        console.print(f"\n  [dim]{scenario.id}[/dim] — {scenario.description.strip()[:70]}")
+        result = analyze_impact(
+            scenario=scenario,
+            namespace=namespace,
+            rules=rules,
+            rules_file=str(rules_path),
+            provider=provider,
+            working_owl=owl_path,
+            document_path=doc_path,
+            mode=mode,
+        )
+
+        for arm in result.arms:
+            console.print(
+                f"    {arm.arm:12s}  P={arm.precision:.2f}  R={arm.recall:.2f}  F1={arm.f1:.2f}"
+                + ("  ← winner" if result.winner == arm.arm else "")
+            )
+
+        out_path = eval_dir / f"{result.id}_impact.json"
+        out_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        _generated("Impact result", out_path)
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +668,26 @@ def main() -> None:
             "Start with an empty working OWL -- ignore any existing file at --owl. "
             "Automatically enabled in --from-owl (validation-loop) mode."
         ),
+    )
+
+    # ── Rules checking (optional) ─────────────────────────────────────────
+    parser.add_argument(
+        "--rules", metavar="YAML", default=None,
+        help="Path to a rules YAML file — runs rule violation check after OWL is written",
+    )
+    parser.add_argument(
+        "--rules-mode", choices=["ontology", "document", "both"], default="ontology",
+        help="Rule checking mode (default: ontology)",
+    )
+
+    # ── Impact analysis (optional) ────────────────────────────────────────
+    parser.add_argument(
+        "--impact", metavar="YAML", default=None,
+        help="Path to an impact scenarios YAML file — runs impact analysis after rule check",
+    )
+    parser.add_argument(
+        "--impact-mode", choices=["ontology", "document", "both"], default="both",
+        help="Impact analysis mode (default: both)",
     )
 
     args = parser.parse_args()
@@ -668,7 +784,39 @@ def main() -> None:
     # STEP 6 — Compare (validation-loop only)
     # ──────────────────────────────────────────────────────────────────────
     if from_owl:
-        step_compare(from_owl, owl_path, tbox_path)
+        step_compare(from_owl, owl_path)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # STEP 7 — Rule violation check (optional, when --rules provided)
+    # ──────────────────────────────────────────────────────────────────────
+    if args.rules:
+        rules_path = Path(args.rules)
+        if not rules_path.is_absolute():
+            rules_path = ROOT / rules_path
+        if not rules_path.exists():
+            console.print(f"[red]Rules file not found: {rules_path}[/red]")
+            sys.exit(1)
+        # Use the synthesized document for document/both mode
+        check_doc = doc_path if args.rules_mode in ("document", "both") else None
+        step_check_rules(rules_path, owl_path, check_doc, provider, args.rules_mode)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # STEP 8 — Impact analysis (optional, when --impact provided)
+    # ──────────────────────────────────────────────────────────────────────
+    if args.impact:
+        impact_path = Path(args.impact)
+        if not impact_path.is_absolute():
+            impact_path = ROOT / impact_path
+        if not impact_path.exists():
+            console.print(f"[red]Impact scenarios file not found: {impact_path}[/red]")
+            sys.exit(1)
+        if not args.rules:
+            console.print("[red]--rules is required when using --impact[/red]")
+            sys.exit(1)
+        impact_doc = doc_path if args.impact_mode in ("document", "both") else None
+        step_analyze_impact(
+            impact_path, rules_path, owl_path, impact_doc, provider, args.impact_mode
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Done — print summary of all generated files

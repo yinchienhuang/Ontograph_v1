@@ -19,6 +19,8 @@ data/artifacts/
 data/extractions/
 data/deltas/
 data/alignments/
+data/evaluations/
+data/violations/
 data/synthesized/
 data/ontology/working/
 data/ontology/working.owl

@@ -1,0 +1,112 @@
+# rules_example.yaml — Compatibility rules for the DemoCubeSat1 ontology.
+#
+# Namespace: http://example.org/cubesat-ontology#
+# Source OWL: data/ontology/cubesatontology.owl
+#
+# Each rule defines a threshold condition checked against individuals of the
+# specified OWL class types.  The checker runs in two modes:
+#
+#   ontology mode  — exact property values from the working OWL graph
+#   document mode  — vague auto-generated plain English + synthesized document text
+#
+# plain_english is left blank — the generator fills it with intentionally vague
+# documentation-style prose (simulating incomplete engineering documentation).
+#
+# All class names and property names must match the ontology vocabulary exactly.
+# Classes: PowerSubsystem, CommunicationSubsystem, ADCSSubsystem, Battery,
+#          Radio, OnBoardComputer, ReactionWheel, SolarPanel, Antenna, ...
+# Properties: massKg, powerW, voltageV, frequencyMHz, dataRateMbps,
+#             operatingTempMinC, operatingTempMaxC, heritageTRL, ...
+
+namespace: "http://example.org/cubesat-ontology#"
+
+rules:
+  # ── Rule 1 (CRITICAL) ─────────────────────────────────────────────────────
+  # BatteryPack1 has operatingTempMinC = -10°C.
+  # LEO cold-case temperatures can reach -40°C during eclipse.
+  # Any battery whose minimum rated temperature is above -20°C is
+  # at risk of failure and is not compatible with the power subsystem.
+  # Expected result: BatteryPack1 VIOLATES this rule (-10 > -20).
+  - id: "compat-001"
+    name: "Battery Cold-Case Temperature Rating"
+    subject_type: "PowerSubsystem"    # EPS1
+    object_type:  "Battery"           # BatteryPack1 (operatingTempMinC = -10)
+    when:
+      attribute: "operatingTempMinC"  # checked on the Battery individual
+      operator:  ">"
+      value:     0
+      unit:      "°C"
+    consequence: "notCompatibleWith"
+    severity:    "critical"
+    note: >
+      LEO eclipse temperatures can drop below -40°C.  Batteries with a minimum
+      operating temperature above 0°C cannot survive the thermal environment
+      and are not compatible with the power subsystem for this mission.
+    plain_english: ""                 # auto-filled by generator if left blank
+
+  # ── Rule 2 (WARNING) ──────────────────────────────────────────────────────
+  # Radio1 has powerW = 4.0 W.
+  # Radios drawing more than 3 W require a dedicated thermal heatsink that
+  # the current CommunicationSubsystem mounting plate does not provide.
+  # Expected result: Radio1 VIOLATES this rule (4.0 > 3.0).
+  - id: "compat-002"
+    name: "Radio Power Draw Heatsink Requirement"
+    subject_type: "CommunicationSubsystem"  # COMMS1
+    object_type:  "Radio"                   # Radio1 (powerW = 4.0 W)
+    when:
+      attribute: "powerW"             # checked on the Radio individual
+      operator:  ">"
+      value:     3.0
+      unit:      "W"
+    consequence: "requiresThermalMitigation"
+    severity:    "warning"
+    note: >
+      The communication subsystem mounting plate has no active cooling.
+      Radios with power draw exceeding 3 W will exceed the thermal design limit
+      without a dedicated heatsink, risking frequency drift and premature failure.
+    plain_english: ""
+
+  # ── Rule 3 (WARNING) ──────────────────────────────────────────────────────
+  # Radio1 has dataRateMbps = 0.256 Mbps.
+  # The mission science downlink budget requires at least 1 Mbps to transfer
+  # daily observation data within the available contact windows.
+  # Expected result: Radio1 VIOLATES this rule (0.256 < 1.0).
+  - id: "compat-003"
+    name: "Science Downlink Data Rate Budget"
+    subject_type: "CommunicationSubsystem"  # COMMS1
+    object_type:  "Radio"                   # Radio1 (dataRateMbps = 0.256)
+    when:
+      attribute: "dataRateMbps"       # checked on the Radio individual
+      operator:  "<"
+      value:     1.0
+      unit:      "Mbps"
+    consequence: "insufficientDownlinkFor"
+    severity:    "warning"
+    note: >
+      The science payload generates approximately 200 MB of data per orbit.
+      With a 10-minute contact window, a minimum downlink rate of 1 Mbps is
+      required.  Radios below this threshold cannot meet the downlink budget.
+    plain_english: ""
+
+  # ── Rule 4 (INFO) — single-entity rule ────────────────────────────────────
+  # OBC1 has powerW = 2.0 W.
+  # On-board computers consuming more than 1.5 W require power budget review
+  # because the EPS has limited available margin on the 3.3 V rail.
+  # Expected result: OBC1 VIOLATES this rule (2.0 > 1.5).
+  # object_type is null → this is a single-entity rule (no pairing).
+  - id: "single-001"
+    name: "On-Board Computer Power Budget Review"
+    subject_type: "OnBoardComputer"   # OBC1 (powerW = 2.0 W)
+    object_type:  null                # single-entity — checks each OBC individually
+    when:
+      attribute: "powerW"             # checked on the OnBoardComputer individual
+      operator:  ">"
+      value:     1.5
+      unit:      "W"
+    consequence: "requiresPowerBudgetReview"
+    severity:    "info"
+    note: >
+      The EPS 3.3 V rail has a design margin of only 0.5 W above 1.5 W.
+      On-board computers exceeding 1.5 W average consumption must be reviewed
+      against the latest power budget before flight approval.
+    plain_english: ""

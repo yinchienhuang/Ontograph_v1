@@ -1,0 +1,83 @@
+# impact_scenarios_example.yaml — Design-change impact scenarios for the CubeSat example.
+#
+# Current OWL state (working.owl): all four rules from rules_example.yaml are violated:
+#   compat-001  BatteryPack1.operatingTempMinC = -10 °C   (rule: > -20  → VIOLATED)
+#   compat-002  Radio1.powerW = 4.0 W                     (rule: > 3.0  → VIOLATED)
+#   compat-003  Radio1.dataRateMbps = 0.256 Mbps           (rule: < 1.0  → VIOLATED)
+#   single-001  OBC1.powerW = 2.0 W                       (rule: > 1.5  → VIOLATED)
+#
+# Each scenario makes one change that resolves exactly one rule.
+# ground_truth_violations = the 3 rules still violated after the change.
+# (Provided as-is for demonstration; in practice derive from an external OWL reasoner.)
+
+namespace: "http://example.org/cubesat-ontology#"
+
+scenarios:
+
+  - id: "impact-001"
+    description: >
+      Replace OBC1 with a more power-efficient on-board computer (powerW drops from
+      2.0 W to 1.0 W). Expected: single-001 (OBC power budget) resolves because
+      1.0 W is below the 1.5 W threshold.
+    component_local: "OBC1"
+    attribute_changes:
+      - property_local: "powerW"
+        old_value: "2.0"
+        new_value: "1.0"
+        unit: "W"
+    ground_truth_violations:
+      - "compat-001"   # Battery temp still -10 °C (unchanged)
+      - "compat-002"   # Radio power still 4.0 W (unchanged)
+      - "compat-003"   # Radio data rate still 0.256 Mbps (unchanged)
+      # single-001 NOT listed → resolved (1.0 W < 1.5 W threshold)
+
+  - id: "impact-002"
+    description: >
+      Upgrade Radio1 to a lower-power model (powerW drops from 4.0 W to 2.0 W).
+      Expected: compat-002 (radio power heatsink requirement) resolves because
+      2.0 W is below the 3.0 W threshold.
+    component_local: "Radio1"
+    attribute_changes:
+      - property_local: "powerW"
+        old_value: "4.0"
+        new_value: "2.0"
+        unit: "W"
+    ground_truth_violations:
+      - "compat-001"   # Battery temp still -10 °C (unchanged)
+      - "compat-003"   # Radio data rate still 0.256 Mbps (unchanged)
+      - "single-001"   # OBC power still 2.0 W (unchanged)
+      # compat-002 NOT listed → resolved (2.0 W < 3.0 W threshold)
+
+  - id: "impact-003"
+    description: >
+      Upgrade BatteryPack1 to a cold-rated battery (operatingTempMinC drops from
+      -10 °C to -25 °C). Expected: compat-001 (battery cold-case temperature rating)
+      resolves because -25 °C satisfies the ≤ -20 °C requirement.
+    component_local: "BatteryPack1"
+    attribute_changes:
+      - property_local: "operatingTempMinC"
+        old_value: "-10"
+        new_value: "-25"
+        unit: "°C"
+    ground_truth_violations:
+      - "compat-002"   # Radio power still 4.0 W (unchanged)
+      - "compat-003"   # Radio data rate still 0.256 Mbps (unchanged)
+      - "single-001"   # OBC power still 2.0 W (unchanged)
+      # compat-001 NOT listed → resolved (-25 > -20 is FALSE)
+
+  - id: "impact-004"
+    description: >
+      Upgrade Radio1 to a high-bandwidth model (dataRateMbps increases from
+      0.256 Mbps to 2.0 Mbps). Expected: compat-003 (science downlink data rate
+      budget) resolves because 2.0 Mbps exceeds the 1.0 Mbps minimum.
+    component_local: "Radio1"
+    attribute_changes:
+      - property_local: "dataRateMbps"
+        old_value: "0.256"
+        new_value: "2.0"
+        unit: "Mbps"
+    ground_truth_violations:
+      - "compat-001"   # Battery temp still -10 °C (unchanged)
+      - "compat-002"   # Radio power still 4.0 W (unchanged)
+      - "single-001"   # OBC power still 2.0 W (unchanged)
+      # compat-003 NOT listed → resolved (2.0 Mbps > 1.0 Mbps, so 2.0 < 1.0 is FALSE)
