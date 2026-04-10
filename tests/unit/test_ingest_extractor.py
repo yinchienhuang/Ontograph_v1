@@ -250,8 +250,9 @@ class TestConvertEntity:
         assert e.relationships == []
 
     def test_system_prompt_mentions_relationships(self):
-        from ontograph.ingest.extractor import _SYSTEM_PROMPT
-        assert "relationship" in _SYSTEM_PROMPT.lower() or "Relationship" in _SYSTEM_PROMPT
+        from ontograph.ingest.extractor import _build_system_prompt
+        prompt = _build_system_prompt(tbox=None)
+        assert "relationship" in prompt.lower()
 
 
 # ---------------------------------------------------------------------------

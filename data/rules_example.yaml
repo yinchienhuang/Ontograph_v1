@@ -1,112 +1,256 @@
-# rules_example.yaml — Compatibility rules for the DemoCubeSat1 ontology.
+# rules_example.yaml — Cross-entity compatibility rules for the DemoCubeSat1 ontology.
 #
 # Namespace: http://example.org/cubesat-ontology#
 # Source OWL: data/ontology/cubesatontology.owl
 #
-# Each rule defines a threshold condition checked against individuals of the
-# specified OWL class types.  The checker runs in two modes:
+# All rules require reasoning across TWO entity types simultaneously:
+#   • the threshold for entity B is derived from entity A's property values, OR
+#   • the condition is only detectable by comparing facts from both entities.
 #
-#   ontology mode  — exact property values from the working OWL graph
-#   document mode  — vague auto-generated plain English + synthesized document text
+# This design maximises the gap between ontology mode (which supplies both
+# entities' exact values) and document mode (which must infer the cross-entity
+# relationship from vague prose).
 #
-# plain_english is left blank — the generator fills it with intentionally vague
-# documentation-style prose (simulating incomplete engineering documentation).
+# plain_english is left blank — the generator fills it with deliberately vague
+# prose that hides the exact threshold and the cross-entity derivation.
 #
-# All class names and property names must match the ontology vocabulary exactly.
-# Classes: PowerSubsystem, CommunicationSubsystem, ADCSSubsystem, Battery,
-#          Radio, OnBoardComputer, ReactionWheel, SolarPanel, Antenna, ...
-# Properties: massKg, powerW, voltageV, frequencyMHz, dataRateMbps,
-#             operatingTempMinC, operatingTempMaxC, heritageTRL, ...
+# Expected outcome summary:
+#   compat-001  PDU ↔ Battery   voltageV ratio       VIOLATES  (7.4 < 1.7 × 5.0 = 8.5)
+#   compat-002  OBC ↔ Radio     powerW ratio         VIOLATES  (4.0 > 1.5 × 2.0 = 3.0)
+#   compat-003  CubeSat ↔ Bat.  mass fraction        VIOLATES  (0.25 > 3% × 6.0 = 0.18)
+#   compat-004  OBC ↔ Radio     data-rate balance    VIOLATES  (0.256 < 0.15 × 2.0 = 0.30)
+#   compat-005  EPS ↔ Battery   thermal range        VIOLATES  (-10 > 40 − 60 = −20)
+#   compat-006  COMMS ↔ Radio   frequency guard band NO VIOLATION (437.5 ≤ 438.0)
+#   compat-007  OBC ↔ PDU       quiescent loss ratio VIOLATES  (0.5 > 20% × 2.0 = 0.40)
 
 namespace: "http://example.org/cubesat-ontology#"
 
 rules:
-  # ── Rule 1 (CRITICAL) ─────────────────────────────────────────────────────
-  # BatteryPack1 has operatingTempMinC = -10°C.
-  # LEO cold-case temperatures can reach -40°C during eclipse.
-  # Any battery whose minimum rated temperature is above -20°C is
-  # at risk of failure and is not compatible with the power subsystem.
-  # Expected result: BatteryPack1 VIOLATES this rule (-10 > -20).
+
+  # ── Rule 1 (CRITICAL) ──────────────────────────────────────────────────────
+  # PDU1 outputs 5.0 V on the primary bus.
+  # A 2S Li-Ion battery pack must supply at least 1.7× the regulated bus
+  # voltage so the DC-DC converter can maintain regulation across the full
+  # depth-of-discharge with margin.  1.7 × 5.0 V = 8.5 V minimum.
+  # BatteryPack1 has voltageV = 7.4 V  →  7.4 < 8.5  →  VIOLATES by 1.1 V (13%).
+  #
+  # Why this is hard for document mode:
+  #   The synthesized document states "7.4 V battery" and "5.0 V bus" in
+  #   separate sections.  The vague rule never states 8.5 V — it refers to
+  #   "adequate voltage headroom for regulated conversion."  The LLM must
+  #   (a) find both values, (b) compute 1.7 × 5.0 = 8.5, and (c) compare —
+  #   all from prose, with no hint of the 1.7× factor.
   - id: "compat-001"
-    name: "Battery Cold-Case Temperature Rating"
-    subject_type: "PowerSubsystem"    # EPS1
-    object_type:  "Battery"           # BatteryPack1 (operatingTempMinC = -10)
+    name: "Battery-to-Bus Voltage Step-Down Ratio"
+    subject_type: "PowerDistributionUnit"   # PDU1  (voltageV = 5.0 V)
+    object_type:  "Battery"                 # BatteryPack1  (voltageV = 7.4 V)
     when:
-      attribute: "operatingTempMinC"  # checked on the Battery individual
-      operator:  ">"
-      value:     0
-      unit:      "°C"
-    consequence: "notCompatibleWith"
+      attribute: "voltageV"
+      operator:  "<"
+      value:     8.5          # 1.7 × PDU1.voltageV = 1.7 × 5.0
+      unit:      "V"
+    consequence: "insufficientVoltageMarginFor"
     severity:    "critical"
     note: >
-      LEO eclipse temperatures can drop below -40°C.  Batteries with a minimum
-      operating temperature above 0°C cannot survive the thermal environment
-      and are not compatible with the power subsystem for this mission.
-    plain_english: ""                 # auto-filled by generator if left blank
-
-  # ── Rule 2 (WARNING) ──────────────────────────────────────────────────────
-  # Radio1 has powerW = 4.0 W.
-  # Radios drawing more than 3 W require a dedicated thermal heatsink that
-  # the current CommunicationSubsystem mounting plate does not provide.
-  # Expected result: Radio1 VIOLATES this rule (4.0 > 3.0).
-  - id: "compat-002"
-    name: "Radio Power Draw Heatsink Requirement"
-    subject_type: "CommunicationSubsystem"  # COMMS1
-    object_type:  "Radio"                   # Radio1 (powerW = 4.0 W)
-    when:
-      attribute: "powerW"             # checked on the Radio individual
-      operator:  ">"
-      value:     3.0
-      unit:      "W"
-    consequence: "requiresThermalMitigation"
-    severity:    "warning"
-    note: >
-      The communication subsystem mounting plate has no active cooling.
-      Radios with power draw exceeding 3 W will exceed the thermal design limit
-      without a dedicated heatsink, risking frequency drift and premature failure.
+      The primary bus operates at 5.0 V (PDU1).  The DC-DC buck converter
+      requires a minimum 1.7× step-down ratio to maintain output regulation
+      across 0–100 % state-of-charge including end-of-life cell degradation,
+      yielding an 8.5 V floor.  BatteryPack1 at 7.4 V is 1.1 V below this
+      floor — regulation will collapse at low SoC during eclipse, risking a
+      bus brownout and loss of mission.
     plain_english: ""
+    expected_violated: true
+
+  # ── Rule 2 (CRITICAL) ──────────────────────────────────────────────────────
+  # OBC1 draws 2.0 W during nominal operations.
+  # The radio is the only other high-power consumer on the same regulated
+  # rail.  To keep EPS margin positive, the radio must not exceed 1.5× the
+  # OBC compute power — i.e., at most 1.5 × 2.0 = 3.0 W.
+  # Radio1 has powerW = 4.0 W  →  4.0 > 3.0  →  VIOLATES.
+  #
+  # Why this is hard for document mode:
+  #   The document mentions OBC power (2.0 W) and radio power (4.0 W) in
+  #   different subsystem sections.  The vague rule says "radio power draw
+  #   must remain within the compute-load budget share."  The LLM must
+  #   look up OBC power, multiply by 1.5, and compare — across two sections.
+  - id: "compat-002"
+    name: "Radio-to-OBC Power Load Ratio"
+    subject_type: "OnBoardComputer"          # OBC1   (powerW = 2.0 W)
+    object_type:  "Radio"                    # Radio1 (powerW = 4.0 W)
+    when:
+      attribute: "powerW"
+      operator:  ">"
+      value:     3.0          # 1.5 × OBC1.powerW = 1.5 × 2.0
+      unit:      "W"
+    consequence: "exceedsPowerBudgetShareOf"
+    severity:    "critical"
+    note: >
+      The EPS allocates power to CDH and COMMS subsystems in a 1 : 1.5 ratio
+      (OBC : Radio) to preserve 15 % system margin.  OBC1 draws 2.0 W, so
+      Radio1 is capped at 3.0 W.  At 4.0 W, Radio1 exceeds this cap by
+      33 %, eliminating EPS margin and risking power cycling during peak load.
+    plain_english: ""
+    expected_violated: true
 
   # ── Rule 3 (WARNING) ──────────────────────────────────────────────────────
-  # Radio1 has dataRateMbps = 0.256 Mbps.
-  # The mission science downlink budget requires at least 1 Mbps to transfer
-  # daily observation data within the available contact windows.
-  # Expected result: Radio1 VIOLATES this rule (0.256 < 1.0).
+  # DemoCubeSat1 has a total wet mass of 6.0 kg.
+  # The power budget reserves at most 3 % of spacecraft mass for the
+  # battery pack: 3 % × 6.0 kg = 0.18 kg.
+  # BatteryPack1 has massKg = 0.25 kg  →  0.25 > 0.18  →  VIOLATES by 39%.
+  #
+  # Why this is hard for document mode:
+  #   Spacecraft mass (6.0 kg) and battery mass (0.25 kg) appear in
+  #   completely separate sections.  The vague rule says "battery mass must
+  #   fit within its subsystem mass allocation."  The LLM cannot compute
+  #   3 % × 6.0 = 0.18 kg unless it finds both numbers and knows the 3 %
+  #   budget fraction — information that does not appear in the document.
   - id: "compat-003"
-    name: "Science Downlink Data Rate Budget"
-    subject_type: "CommunicationSubsystem"  # COMMS1
-    object_type:  "Radio"                   # Radio1 (dataRateMbps = 0.256)
+    name: "Battery Mass Fraction of Spacecraft"
+    subject_type: "CubeSat"                  # DemoCubeSat1 (massKg = 6.0 kg)
+    object_type:  "Battery"                  # BatteryPack1 (massKg = 0.25 kg)
     when:
-      attribute: "dataRateMbps"       # checked on the Radio individual
+      attribute: "massKg"
+      operator:  ">"
+      value:     0.18         # 3 % × DemoCubeSat1.massKg = 0.03 × 6.0
+      unit:      "kg"
+    consequence: "exceedsMassBudgetAllocationOf"
+    severity:    "warning"
+    note: >
+      3U CubeSat mass budget allocates ≤ 3 % to the primary battery to
+      preserve centre-of-mass margins and structural load paths.  At 6.0 kg
+      total, the battery is capped at 0.18 kg.  BatteryPack1 at 0.25 kg
+      exceeds this by 70 g — a 39 % overrun sufficient to violate the mass
+      budget and require a formal waiver from the launch vehicle authority.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 4 (WARNING) ──────────────────────────────────────────────────────
+  # OBC1 generates science and housekeeping data at a rate proportional to
+  # its compute power: 0.15 Mbps per watt of OBC power.
+  # OBC1 draws 2.0 W  →  minimum link rate = 0.15 × 2.0 = 0.30 Mbps.
+  # Radio1 has dataRateMbps = 0.256  →  0.256 < 0.30  →  VIOLATES.
+  #
+  # Why this is hard for document mode:
+  #   The document states OBC power (2.0 W) and radio data rate (0.256 Mbps)
+  #   in separate subsystem descriptions.  The vague rule says "the radio
+  #   link must keep pace with onboard data generation."  The LLM must
+  #   find the OBC power figure, apply the 0.15 Mbps/W factor, and compare
+  #   to the radio rate — three cross-section inference steps.
+  - id: "compat-004"
+    name: "Radio Link Rate vs OBC Data Generation Budget"
+    subject_type: "OnBoardComputer"          # OBC1   (powerW = 2.0 W)
+    object_type:  "Radio"                    # Radio1 (dataRateMbps = 0.256 Mbps)
+    when:
+      attribute: "dataRateMbps"
       operator:  "<"
-      value:     1.0
+      value:     0.30         # 0.15 Mbps/W × OBC1.powerW = 0.15 × 2.0
       unit:      "Mbps"
     consequence: "insufficientDownlinkFor"
     severity:    "warning"
     note: >
-      The science payload generates approximately 200 MB of data per orbit.
-      With a 10-minute contact window, a minimum downlink rate of 1 Mbps is
-      required.  Radios below this threshold cannot meet the downlink budget.
+      Empirical CubeSat CDH modelling gives ≈ 0.15 Mbps of raw data per watt
+      of OBC compute power (housekeeping + payload framing overhead).  OBC1
+      at 2.0 W generates ≈ 0.30 Mbps; Radio1 at 0.256 Mbps cannot clear the
+      buffer within a standard 10-minute contact window, leading to data loss.
     plain_english: ""
+    expected_violated: true
 
-  # ── Rule 4 (INFO) — single-entity rule ────────────────────────────────────
-  # OBC1 has powerW = 2.0 W.
-  # On-board computers consuming more than 1.5 W require power budget review
-  # because the EPS has limited available margin on the 3.3 V rail.
-  # Expected result: OBC1 VIOLATES this rule (2.0 > 1.5).
-  # object_type is null → this is a single-entity rule (no pairing).
-  - id: "single-001"
-    name: "On-Board Computer Power Budget Review"
-    subject_type: "OnBoardComputer"   # OBC1 (powerW = 2.0 W)
-    object_type:  null                # single-entity — checks each OBC individually
+  # ── Rule 5 (CRITICAL) ──────────────────────────────────────────────────────
+  # The PowerSubsystem operates in LEO, where the orbital thermal cycle spans
+  # roughly −40 °C (eclipse cold soak) to +60 °C (direct solar exposure).
+  # A battery integrated into EPS must cover at least 60 °C of this range.
+  # For BatteryPack1 with operatingTempMaxC = 40 °C, the required minimum is:
+  #   40 − 60 = −20 °C.
+  # BatteryPack1 has operatingTempMinC = −10 °C  →  −10 > −20  →  VIOLATES.
+  #
+  # Why this is hard for document mode:
+  #   The document gives both temperature limits for the battery, but the
+  #   vague rule says "battery must accommodate the full orbital thermal
+  #   cycle."  The LLM must (a) look up max temp (40 °C), (b) know the
+  #   60 °C required span, (c) compute min threshold = 40 − 60 = −20 °C,
+  #   and (d) compare to −10 °C — all from prose with no explicit threshold.
+  - id: "compat-005"
+    name: "Battery Thermal Range for Orbital Cycle Coverage"
+    subject_type: "PowerSubsystem"           # EPS1 (sets the thermal environment)
+    object_type:  "Battery"                  # BatteryPack1 (operatingTempMinC = −10, max = 40)
     when:
-      attribute: "powerW"             # checked on the OnBoardComputer individual
+      attribute: "operatingTempMinC"
       operator:  ">"
-      value:     1.5
-      unit:      "W"
-    consequence: "requiresPowerBudgetReview"
+      value:     -20          # operatingTempMaxC (40) − required range (60) = −20
+      unit:      "°C"
+    consequence: "insufficientThermalRangeFor"
+    severity:    "critical"
+    note: >
+      LEO eclipse cold soak reaches −40 °C; direct solar exposure peaks at
+      +60 °C.  EPS integration requires the battery to span at least 60 °C
+      of the orbital thermal cycle.  Given BatteryPack1 is rated to +40 °C
+      maximum, its cold floor must reach −20 °C or below.  At −10 °C minimum
+      the battery provides only a 50 °C range — 10 °C short — and will fail
+      thermal qualification for the EPS integration slot.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 6 (INFO) — expected NO VIOLATION ─────────────────────────────────
+  # CommunicationSubsystem must operate within the ITU amateur-satellite
+  # sub-band 435.000–438.000 MHz.  Any frequency above 438.0 MHz falls into
+  # an adjacent allocation requiring a separate licence.
+  # Radio1 has frequencyMHz = 437.5  →  437.5 ≤ 438.0  →  NO VIOLATION.
+  #
+  # Why this is a useful comparison point:
+  #   The document states the frequency (437.5 MHz).  The vague rule says
+  #   "radio must operate within the licensed satellite coordination band."
+  #   A hallucinating LLM may incorrectly flag a violation (false positive)
+  #   because it does not know the exact upper bound is 438.0 MHz.
+  #   Ontology mode reads 437.5 ≤ 438.0 and correctly reports no violation.
+  - id: "compat-006"
+    name: "Radio Frequency Upper Guard Band Compliance"
+    subject_type: "CommunicationSubsystem"   # COMMS1
+    object_type:  "Radio"                    # Radio1 (frequencyMHz = 437.5 MHz)
+    when:
+      attribute: "frequencyMHz"
+      operator:  ">"
+      value:     438.0        # ITU amateur-satellite sub-band upper bound
+      unit:      "MHz"
+    consequence: "exceedsFrequencyAllocationOf"
     severity:    "info"
     note: >
-      The EPS 3.3 V rail has a design margin of only 0.5 W above 1.5 W.
-      On-board computers exceeding 1.5 W average consumption must be reviewed
-      against the latest power budget before flight approval.
+      ITU-R Resolution 640 allocates 435–438 MHz exclusively for amateur
+      satellites.  Any uplink or downlink above 438.0 MHz requires a separate
+      fixed-satellite service coordination filing, adding 6–18 months of
+      regulatory lead time.  Radio1 at 437.5 MHz is 500 kHz inside the upper
+      bound — compliant, but there is no guard band for frequency drift.
     plain_english: ""
+    expected_violated: false
+
+  # ── Rule 7 (WARNING) ──────────────────────────────────────────────────────
+  # OBC1 draws 2.0 W from the PDU-regulated rail.
+  # The PDU itself dissipates 0.5 W in quiescent losses (conversion + control).
+  # PDU quiescent loss must not exceed 20 % of the load it serves.
+  # 20 % × OBC1.powerW = 20 % × 2.0 = 0.40 W.
+  # PDU1 has powerW = 0.5 W  →  0.5 > 0.40  →  VIOLATES.
+  #
+  # Why this is hard for document mode:
+  #   OBC power (2.0 W) and PDU quiescent loss (0.5 W) appear in separate
+  #   subsystem sections.  The vague rule says "PDU conversion efficiency
+  #   must remain within acceptable limits for the connected load."  The LLM
+  #   must find both figures, apply the 20 % efficiency-loss ceiling, compute
+  #   the threshold, and compare — across two unrelated document sections.
+  - id: "compat-007"
+    name: "PDU Quiescent Loss vs OBC Load Efficiency Ceiling"
+    subject_type: "OnBoardComputer"           # OBC1 (powerW = 2.0 W — the load)
+    object_type:  "PowerDistributionUnit"     # PDU1 (powerW = 0.5 W — quiescent loss)
+    when:
+      attribute: "powerW"
+      operator:  ">"
+      value:     0.40         # 20 % × OBC1.powerW = 0.20 × 2.0
+      unit:      "W"
+    consequence: "exceedsEfficiencyLossLimitOf"
+    severity:    "warning"
+    note: >
+      Best-practice EPS design caps PDU quiescent losses at ≤ 20 % of the
+      primary regulated load to maintain overall power chain efficiency ≥ 80 %.
+      OBC1 draws 2.0 W, giving a 0.40 W loss ceiling.  PDU1 dissipates 0.50 W
+      in quiescent conversion and housekeeping, a 25 % loss ratio — 5 percentage
+      points above the ceiling and sufficient to fail the EPS efficiency review.
+    plain_english: ""
+    expected_violated: true

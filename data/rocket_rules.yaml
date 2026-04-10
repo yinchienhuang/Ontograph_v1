@@ -1,0 +1,244 @@
+# rocket_rules.yaml — Cross-entity design rules for the RocketDemo ontology.
+#
+# Namespace: http://example.org/rocket_large#
+# Source OWL: data/ontology/rocket_design_ontology.owl
+#
+# All rules require multi-hop reasoning across two entity types.
+# Thresholds for one entity are always derived from properties of the other,
+# or from aggregations across multiple individuals of the same class.
+#
+# Key numeric values:
+#   Stage1.massKg      = 350,000   Stage2.massKg      = 280,000
+#   Tank1.massKg       = 100,000   Tank2.massKg       = 120,000   Tank3.massKg = 90,000
+#   EngineA.thrustkN   =    800    EngineB.thrustkN   =     750   EngineC.thrustkN = 300
+#   ThrustRequirement.requiredThrust = 2,000 kN
+#   MassConstraint.maxMassAllowed    = 600,000 kg
+#   PowerConstraint.maxPower         = 8,000 W
+#   Avionics1.powerW   =  5,000    Avionics2.powerW   =   4,000
+#   Battery1.powerW    =  3,000
+#   Thermal1.heatLoad  = 12,000
+#
+# Expected outcome summary:
+#   compat-001  Requirement ↔ Engine   thrust margin factor   VIOLATES  (A+B+C=1850 < 1.15×2000=2300)
+#   compat-002  Constraint  ↔ Stage    combined mass budget   VIOLATES  (S1+S2=630k > 550k)
+#   compat-003  Stage       ↔ Tank     propellant mass ratio  VIOLATES  (T2=120k > 35%×280k=98k)
+#   compat-004  PowerConst  ↔ Avionics combined power draw    VIOLATES  (5k+4k=9k > 8k)
+#   compat-005  Battery     ↔ Thermal  thermal-power ratio    VIOLATES  (12k > 3.5×3k=10.5k)
+#   compat-006  Requirement ↔ Engine   single-engine-out safe NO VIOL.  (A+B=1550 > 0.65×2000=1300)
+
+namespace: "http://example.org/rocket_large#"
+
+rules:
+
+  # ── Rule 1 (CRITICAL) ──────────────────────────────────────────────────────
+  # ThrustRequirement.requiredThrust = 2,000 kN.
+  # Propulsion safety margins require total installed thrust to be at least
+  # 1.15× the required thrust to cover engine performance scatter and liftoff
+  # transients.  1.15 × 2,000 = 2,300 kN.
+  # EngineA (800) + EngineB (750) + EngineC (300) = 1,850 kN
+  #   →  1,850 < 2,300  →  VIOLATES by 450 kN.
+  #
+  # Why this is hard for document mode:
+  #   Three engine thrust values appear in separate component descriptions.
+  #   ThrustRequirement appears in a mission-requirements section.  The vague
+  #   rule says "installed thrust must meet the mission requirement with
+  #   adequate margin."  The LLM must (a) sum all three engine values,
+  #   (b) apply the 1.15× margin factor that is never stated in the document,
+  #   and (c) compare to the requirement — four cross-section inference steps.
+  - id: "compat-001"
+    name: "Total Installed Thrust vs Required Thrust Safety Margin"
+    subject_type: "Requirement"   # ThrustRequirement (requiredThrust = 2000 kN)
+    object_type:  "Engine"        # EngineA/B/C (sum of thrustkN)
+    when:
+      attribute: "thrustkN"
+      operator:  "<"
+      value:     2300.0           # 1.15 × ThrustRequirement.requiredThrust = 1.15 × 2000
+      unit:      "kN"
+    consequence: "insufficientThrustMarginFor"
+    severity:    "critical"
+    note: >
+      NASA-STD-5012B and SpaceX CRS-2 design heritage both require ≥ 15 %
+      installed-thrust margin above the minimum liftoff thrust-to-weight ratio.
+      ThrustRequirement specifies 2,000 kN; the 1.15× margin floor is 2,300 kN.
+      EngineA (800) + EngineB (750) + EngineC (300) = 1,850 kN — 450 kN short.
+      The vehicle cannot achieve liftoff within the certified flight envelope.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 2 (CRITICAL) ──────────────────────────────────────────────────────
+  # MassConstraint.maxMassAllowed = 600,000 kg (pad structural limit).
+  # Design rules require an additional 50,000 kg mass-growth reserve on top
+  # of the pad limit to account for manufacturing tolerances and late changes,
+  # giving an effective design ceiling of 550,000 kg.
+  # Stage1.massKg (350,000) + Stage2.massKg (280,000) = 630,000 kg
+  #   →  630,000 > 550,000  →  VIOLATES by 80,000 kg (15%).
+  #
+  # Why this is hard for document mode:
+  #   Stage masses appear in separate stage-description sections.
+  #   The mass constraint is buried in a system-requirements section.
+  #   The vague rule says "total vehicle mass must remain within the
+  #   launch-pad structural capacity including design margin."  The LLM
+  #   must sum two stage masses from different sections, apply the growth
+  #   reserve, and compare to a constraint from a third section.
+  - id: "compat-002"
+    name: "Combined Stage Mass vs Launch Pad Mass Constraint"
+    subject_type: "Constraint"   # MassConstraint (maxMassAllowed = 600,000 kg)
+    object_type:  "Stage"        # Stage1 + Stage2 (sum of massKg)
+    when:
+      attribute: "massKg"
+      operator:  ">"
+      value:     550000.0        # MassConstraint.maxMassAllowed − 50,000 kg design-growth reserve
+      unit:      "kg"
+    consequence: "exceedsMassConstraintOf"
+    severity:    "critical"
+    note: >
+      The launch pad strongback is certified for 600,000 kg, but programme
+      design rules mandate a 50,000 kg growth reserve to absorb manufacturing
+      tolerances and late mass additions, giving an effective design ceiling
+      of 550,000 kg.  Stage1 (350,000 kg) and Stage2 (280,000 kg) together
+      total 630,000 kg — 80,000 kg (15 %) above this ceiling.  The vehicle
+      requires a mass reduction programme before it can proceed to rollout.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 3 (WARNING) ──────────────────────────────────────────────────────
+  # Stage2.massKg = 280,000 kg.
+  # Propulsion system design rules cap the mass of any single propellant tank
+  # at 35 % of its host stage mass to maintain centre-of-mass stability and
+  # structural load-path integrity.  35 % × 280,000 = 98,000 kg.
+  # Tank2.massKg = 120,000  →  120,000 > 98,000  →  VIOLATES by 22,000 kg.
+  #
+  # Why this is hard for document mode:
+  #   Tank2 and Stage2 masses appear in separate subsystem sections with no
+  #   explicit link between them.  The vague rule says "tank mass must remain
+  #   within the structural allocation of the host stage."  The LLM must
+  #   (a) identify which tank belongs to which stage, (b) apply the 35 % cap,
+  #   (c) compute 0.35 × 280,000 = 98,000 kg, and (d) compare to Tank2 mass —
+  #   none of which is co-located or explicitly stated in the document.
+  - id: "compat-003"
+    name: "Tank Mass vs Host Stage Structural Allocation"
+    subject_type: "Stage"    # Stage2 (massKg = 280,000 kg)
+    object_type:  "Tank"     # Tank2  (massKg = 120,000 kg)
+    when:
+      attribute: "massKg"
+      operator:  ">"
+      value:     98000.0     # 35 % × Stage2.massKg = 0.35 × 280,000
+      unit:      "kg"
+    consequence: "exceedsTankMassAllocationOf"
+    severity:    "warning"
+    note: >
+      Structural analysis (based on Falcon 9 airframe heritage) caps propellant
+      tank mass at ≤ 35 % of host stage dry mass to limit bending moments at
+      the inter-stage coupling ring.  Stage2 at 280,000 kg gives a 98,000 kg
+      per-tank ceiling.  Tank2 at 120,000 kg exceeds this by 22,000 kg,
+      requiring a stage structural redesign or propellant redistribution.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 4 (CRITICAL) ──────────────────────────────────────────────────────
+  # PowerConstraint.maxPower = 8,000 W.
+  # This is the total avionics rail power budget.
+  # Avionics1.powerW (5,000) + Avionics2.powerW (4,000) = 9,000 W
+  #   →  9,000 > 8,000  →  VIOLATES by 1,000 W.
+  #
+  # Why this is hard for document mode:
+  #   Each avionics unit's power draw is in a separate hardware-description
+  #   section.  The power constraint is in a system-level electrical section.
+  #   The vague rule says "avionics power consumption must not exceed the
+  #   allocated electrical budget."  The LLM must sum two avionics power
+  #   values from different sections and compare to a third-section constraint —
+  #   with no hint that both units share the same budget rail.
+  - id: "compat-004"
+    name: "Combined Avionics Power Draw vs Power Constraint Budget"
+    subject_type: "PowerSystem"   # Battery1 / PowerConstraint context
+    object_type:  "Avionics"      # Avionics1 + Avionics2 (sum of powerW)
+    when:
+      attribute: "powerW"
+      operator:  ">"
+      value:     8000.0           # PowerConstraint.maxPower
+      unit:      "W"
+    consequence: "exceedsPowerBudgetOf"
+    severity:    "critical"
+    note: >
+      The regulated avionics bus (PowerConstraint) is rated at 8,000 W
+      continuous to maintain bus voltage within ±2 % across all flight phases.
+      Avionics1 (5,000 W) and Avionics2 (4,000 W) together demand 9,000 W —
+      12.5 % above the bus rating.  Sustained overdraw will cause voltage sag
+      during max-Q, risking inertial navigation lock-loss and flight computer
+      reset during the critical first-stage burn.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 5 (WARNING) ──────────────────────────────────────────────────────
+  # Battery1.powerW = 3,000 W (the power system's continuous output).
+  # Thermal management design rules require that the thermal system's peak
+  # heat load must not exceed 3.5× the power system's continuous output
+  # (a proxy for expected dissipation from the power train itself).
+  # 3.5 × 3,000 = 10,500 W.
+  # Thermal1.heatLoad = 12,000  →  12,000 > 10,500  →  VIOLATES.
+  #
+  # Why this is hard for document mode:
+  #   Battery power output and thermal system heat load are in completely
+  #   separate subsystem chapters.  The vague rule says "the thermal system
+  #   must be sized to handle heat loads consistent with the onboard power
+  #   generation capacity."  The LLM must (a) retrieve Battery1 power,
+  #   (b) apply the 3.5× empirical factor (never stated in the document),
+  #   (c) compute 10,500 W, and (d) compare to Thermal1.heatLoad = 12,000 W.
+  - id: "compat-005"
+    name: "Thermal Heat Load vs Power System Output Ratio"
+    subject_type: "PowerSystem"     # Battery1 (powerW = 3,000 W)
+    object_type:  "ThermalSystem"   # Thermal1 (heatLoad = 12,000 W)
+    when:
+      attribute: "heatLoad"
+      operator:  ">"
+      value:     10500.0            # 3.5 × Battery1.powerW = 3.5 × 3,000
+      unit:      "W"
+    consequence: "exceedsThermalCapacityRatioOf"
+    severity:    "warning"
+    note: >
+      Rocket thermal design heritage (Ariane 6 CDR data) shows that peak
+      structural heat loads should not exceed 3.5× the avionics/battery
+      continuous power output, because the power train is the dominant internal
+      heat source.  Battery1 at 3,000 W gives a 10,500 W ceiling.
+      Thermal1 at 12,000 W is 1,500 W above this — indicating under-sized
+      radiator panels and risk of exceeding thermal interface material limits
+      on the avionics bay cold plate during ascent.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 6 (INFO) — expected NO VIOLATION ─────────────────────────────────
+  # ThrustRequirement.requiredThrust = 2,000 kN.
+  # Single-engine-out (SEO) safety rule: the vehicle must be able to continue
+  # flight with the weakest engine failed, using the remaining engines.
+  # Losing the weakest engine (EngineC, 300 kN):
+  #   EngineA (800) + EngineB (750) = 1,550 kN.
+  # The SEO threshold is 65 % of requiredThrust = 0.65 × 2,000 = 1,300 kN.
+  # 1,550 ≥ 1,300  →  NO VIOLATION (19% margin).
+  #
+  # Why this is a useful comparison point:
+  #   The document mentions all three engine thrusts in separate sections.
+  #   The vague rule says "the vehicle must maintain controllable flight
+  #   following a single propulsion unit failure."  A hallucinating LLM
+  #   may incorrectly pick the wrong engine to remove or missum the remaining
+  #   thrust.  Ontology mode reads exact values and correctly finds no
+  #   violation (1,550 ≥ 1,300).
+  - id: "compat-006"
+    name: "Single-Engine-Out Minimum Thrust Continuity"
+    subject_type: "Requirement"   # ThrustRequirement (requiredThrust = 2,000 kN)
+    object_type:  "Engine"        # EngineA + EngineB (best two engines = 1,550 kN)
+    when:
+      attribute: "thrustkN"
+      operator:  "<"
+      value:     1300.0           # 65 % × ThrustRequirement.requiredThrust = 0.65 × 2000
+      unit:      "kN"
+    consequence: "insufficientSingleEngineOutThrustFor"
+    severity:    "info"
+    note: >
+      FAA 14 CFR Part 460 and ESA ECSS-E-ST-35C require that after any
+      single engine failure the remaining propulsion must sustain ≥ 65 % of
+      the minimum required thrust to maintain trajectory control authority.
+      ThrustRequirement is 2,000 kN, giving a 1,300 kN SEO floor.
+      With EngineC (300 kN) as the failed unit, EngineA + EngineB = 1,550 kN —
+      250 kN (19 %) above the floor.  The configuration is SEO-compliant.
+    plain_english: ""
+    expected_violated: false

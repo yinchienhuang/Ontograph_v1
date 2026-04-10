@@ -27,6 +27,7 @@ from ontograph.models.extraction import (
     ExtractedRelationship,
     ExtractionBundle,
 )
+from ontograph.utils.owl import TBoxSummary
 
 # ---------------------------------------------------------------------------
 # LLM response schemas
@@ -97,18 +98,24 @@ class ChunkExtractionResponse(BaseModel):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_HEADER = """\
 You are an aerospace knowledge extraction engine.
 
 Extract named entities from the aerospace document section provided.
 
 ENTITY TYPES (use exactly one per entity):
+"""
+
+_SYSTEM_FALLBACK_TYPES = """\
   Component    — a physical hardware item (thruster, valve, sensor, tank …)
   Subsystem    — a functional grouping (propulsion subsystem, ADCS, power …)
   Material     — a substance or material (titanium alloy, MON-3/MMH …)
   Interface    — a connection between two systems
   Organization — a company, agency, or authority (NASA, FAA, ESA …)
-  Standard     — a standard or specification (MIL-STD-1553, ECSS-E-ST-10C …)
+  Standard     — a standard or specification (MIL-STD-1553, ECSS-E-ST-10C …)\
+"""
+
+_SYSTEM_FOOTER = """
 
 FOR EACH ENTITY extract every measurable attribute mentioned in the text:
   name      — snake_case canonical name (e.g. "dry_mass", "specific_impulse")
@@ -134,14 +141,28 @@ RULES:
 """
 
 
-def _build_extraction_messages(chunk: Chunk) -> list[LLMMessage]:
+def _build_system_prompt(tbox: TBoxSummary | None) -> str:
+    """Build the extraction system prompt, optionally injecting TBox class names."""
+    if tbox and tbox.classes:
+        classes_block = "\n".join(f"  {c}" for c in sorted(tbox.classes))
+        type_section = (
+            classes_block
+            + "\n\n  If no class fits, use the closest generic type: "
+            "Component, Subsystem, Location, Person, or Operation."
+        )
+    else:
+        type_section = _SYSTEM_FALLBACK_TYPES
+    return _SYSTEM_HEADER + type_section + _SYSTEM_FOOTER
+
+
+def _build_extraction_messages(chunk: Chunk, tbox: TBoxSummary | None = None) -> list[LLMMessage]:
     user_content = (
         f"Document section:\n\n"
         f"{chunk.to_llm_context()}\n\n"
         f"Extract all named entities and their attributes from this text."
     )
     return [
-        LLMMessage(role="system", content=_SYSTEM_PROMPT),
+        LLMMessage(role="system", content=_build_system_prompt(tbox)),
         LLMMessage(role="user",   content=user_content),
     ]
 
@@ -195,6 +216,7 @@ def extract(
     artifact: DocumentArtifact,
     provider: LLMProvider,
     min_chunk_chars: int = 30,
+    tbox: TBoxSummary | None = None,
 ) -> ExtractionBundle:
     """
     Extract entities and attributes from every qualifying chunk.
@@ -219,12 +241,12 @@ def extract(
         if len(c.text) < min_chunk_chars:
             continue
 
-        messages = _build_extraction_messages(c)
+        messages = _build_extraction_messages(c, tbox=tbox)
         request = LLMRequest(
             messages=messages,
             response_model=ChunkExtractionResponse,
             temperature=0.0,   # deterministic for extraction
-            max_tokens=2048,
+            max_tokens=4096,
         )
 
         try:

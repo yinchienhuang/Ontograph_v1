@@ -1,0 +1,238 @@
+# uam_rules.yaml — Cross-entity operational rules for the UAM ontology.
+#
+# Namespace: http://example.org/uam#
+# Source OWL: data/ontology/uam.owl
+#
+# Every rule requires multi-hop reasoning across two entity types.
+# The threshold for one entity is always derived from a property of the
+# other entity — so neither individual alone is sufficient to determine
+# whether a violation exists.
+#
+# Multi-hop chains exploited:
+#   FlightOperation → usesRoute → FlightRoute → fliesIn → UrbanAirspace
+#                                                        → hasWeather → WeatherCondition
+#   eVTOL.capacity  drives allowed windSpeed ceiling
+#   FlightRoute.distanceKm × reserve factor drives minimum eVTOL.rangeKm
+#
+# plain_english is left blank — the generator fills it with deliberately vague
+# prose that omits the exact threshold and hides its cross-entity derivation.
+#
+# Expected outcome summary:
+#   compat-001  FlightRoute ↔ eVTOL       range reserve factor   VIOLATES  (150 < 4.5×40 = 180)
+#   compat-002  FlightOperation ↔ Weather  wind VMC ceiling       VIOLATES  (10 > 8)
+#   compat-003  Weather ↔ FlightRoute      wind-adjusted radius   VIOLATES  (40 > 3.5×10 = 35)
+#   compat-004  FlightRoute ↔ eVTOL       urban capacity limit   VIOLATES  (4 > 3)
+#   compat-005  eVTOL ↔ Weather           load-scaled crosswind  VIOLATES  (10 > 1.5×4 = 6)
+#   compat-006  FlightRoute ↔ eVTOL       range oversizing check NO VIOL.  (150 ≤ 5×40 = 200)
+
+namespace: "http://example.org/uam#"
+
+rules:
+
+  # ── Rule 1 (CRITICAL) ──────────────────────────────────────────────────────
+  # RouteA has distanceKm = 40.0 km.
+  # UAM energy-reserve regulations require the assigned eVTOL to carry
+  # enough charge for the full route, a full return leg, and a 50 % buffer —
+  # totalling 4.5× the one-way route distance.  4.5 × 40.0 = 180.0 km.
+  # JobyS4 has rangeKm = 150.0  →  150.0 < 180.0  →  VIOLATES by 30 km (17%).
+  #
+  # Why this is hard for document mode:
+  #   The document states eVTOL range (150 km) and route distance (40 km)
+  #   in separate operational-spec sections.  The vague rule never mentions
+  #   the 4.5× factor — it says "the aircraft must have sufficient range for
+  #   the assigned mission including contingency reserves."  The LLM must
+  #   (a) find both numbers, (b) apply the 4.5× reserve multiplier, and
+  #   (c) recognise that 150 < 180 is a violation — all from prose.
+  - id: "compat-001"
+    name: "eVTOL Range vs Route Round-Trip Reserve Factor"
+    subject_type: "FlightRoute"   # RouteA  (distanceKm = 40.0 km)
+    object_type:  "eVTOL"         # JobyS4  (rangeKm = 150.0 km)
+    when:
+      attribute: "rangeKm"
+      operator:  "<"
+      value:     180.0            # 4.5 × RouteA.distanceKm = 4.5 × 40.0
+      unit:      "km"
+    consequence: "insufficientRangeReserveFor"
+    severity:    "critical"
+    note: >
+      FAA AC 20-185 requires UAM vehicles to carry energy for: (1) the
+      planned route, (2) a full return to the departure vertiport, and
+      (3) a 50 % contingency buffer — together equivalent to 4.5× the
+      one-way route distance.  RouteA is 40.0 km, so the minimum certified
+      range is 180.0 km.  JobyS4 at 150.0 km falls 30 km short (17 % deficit)
+      and would be grounded under current certification standards.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 2 (CRITICAL) ──────────────────────────────────────────────────────
+  # FlightMission1 is conducted in UrbanZone1, which is under WeatherCondition
+  # Weather1 with windSpeed = 10.0 m/s.
+  # EASA SC E-19 sets a VMC wind ceiling of 8.0 m/s for eVTOL commercial
+  # operations; above that, a flight must be cancelled or rerouted.
+  # windSpeed = 10.0  →  10.0 > 8.0  →  VIOLATES.
+  #
+  # Why this is hard for document mode (4-hop chain):
+  #   FlightMission1 → usesRoute → RouteA → fliesIn → UrbanZone1
+  #                                                  → hasWeather → Weather1
+  #   The document describes each link in a different paragraph.  The vague
+  #   rule says "flights must operate within approved meteorological
+  #   conditions."  The LLM must traverse the chain, find windSpeed,
+  #   and know the 8.0 m/s ceiling — none of which is co-located in the text.
+  - id: "compat-002"
+    name: "Flight Mission Wind Speed VMC Ceiling"
+    subject_type: "FlightOperation"    # FlightMission1 (usesRoute → UrbanZone1 → Weather1)
+    object_type:  "WeatherCondition"   # Weather1  (windSpeed = 10.0 m/s)
+    when:
+      attribute: "windSpeed"
+      operator:  ">"
+      value:     8.0              # EASA SC E-19 VMC ceiling for eVTOL commercial ops
+      unit:      "m/s"
+    consequence: "exceedsWeatherLimitFor"
+    severity:    "critical"
+    note: >
+      EASA Special Condition E-19 and FAA InFO 21007 both cap eVTOL VMC
+      operations at 8.0 m/s surface wind.  Above this threshold turbulence
+      from urban canyons overwhelms attitude-control authority on current
+      six-rotor configurations.  Weather1 reports 10.0 m/s — 25 % above the
+      ceiling — requiring mandatory flight cancellation or airspace avoidance.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 3 (WARNING) ──────────────────────────────────────────────────────
+  # Weather1 has windSpeed = 10.0 m/s.
+  # Headwind load reduces effective range: the maximum safe one-way route
+  # radius is 3.5× the wind speed in m/s (empirical UAM planning factor).
+  # 3.5 × 10.0 = 35.0 km.
+  # RouteA has distanceKm = 40.0  →  40.0 > 35.0  →  VIOLATES by 5 km.
+  #
+  # Why this is hard for document mode:
+  #   Wind speed and route length appear in separate sections.  The vague
+  #   rule says "route length must remain within the wind-adjusted
+  #   operational envelope."  The LLM must locate both values, apply the
+  #   3.5× empirical factor, and compare — without the factor ever being
+  #   stated in the document.
+  - id: "compat-003"
+    name: "Route Distance vs Wind-Adjusted Operational Radius"
+    subject_type: "WeatherCondition"   # Weather1  (windSpeed = 10.0 m/s)
+    object_type:  "FlightRoute"        # RouteA    (distanceKm = 40.0 km)
+    when:
+      attribute: "distanceKm"
+      operator:  ">"
+      value:     35.0             # 3.5 × Weather1.windSpeed = 3.5 × 10.0
+      unit:      "km"
+    consequence: "exceedsWindAdjustedRadiusFor"
+    severity:    "warning"
+    note: >
+      UAM flight-planning guidance (RTCA DO-396) caps route radius at
+      3.5 km per m/s of surface wind to preserve energy margin against
+      sustained headwinds.  At 10.0 m/s, the safe radius is 35.0 km.
+      RouteA at 40.0 km extends 5 km beyond this envelope and cannot be
+      flown without a wind-waiver and an alternate vertiport designation.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 4 (WARNING) ──────────────────────────────────────────────────────
+  # RouteA flies through UrbanZone1 (fliesIn = UrbanZone1).
+  # Urban airspace density regulations cap passenger capacity at 3 persons
+  # per aircraft to limit noise, ground-risk footprint, and ATC complexity.
+  # JobyS4 has capacity = 4  →  4 > 3  →  VIOLATES.
+  #
+  # Why this is hard for document mode (multi-hop + domain knowledge):
+  #   The document states that RouteA goes through UrbanZone1 and separately
+  #   that JobyS4 has capacity 4.  The vague rule says "aircraft operating
+  #   in urban airspace must comply with passenger load restrictions."
+  #   The LLM must (a) recognise that the route is urban, (b) know the urban
+  #   capacity ceiling is 3 — which is not stated in the document — and
+  #   (c) flag capacity 4 as a violation.
+  - id: "compat-004"
+    name: "eVTOL Passenger Capacity in Urban Airspace"
+    subject_type: "FlightRoute"   # RouteA  (fliesIn = UrbanZone1 → urban restriction applies)
+    object_type:  "eVTOL"         # JobyS4  (capacity = 4)
+    when:
+      attribute: "capacity"
+      operator:  ">"
+      value:     3                # Urban airspace density ceiling (persons per flight)
+      unit:      "passengers"
+    consequence: "exceedsUrbanCapacityLimitFor"
+    severity:    "warning"
+    note: >
+      FAA UASSP Urban Integration Policy limits eVTOL passenger capacity to
+      3 persons per flight in Class B/C urban airspace to constrain ground-risk
+      area (proportional to fuselage size), reduce noise exposure on populated
+      corridors, and keep ATC sector loading below threshold.  JobyS4 at
+      capacity 4 exceeds this limit and requires a higher-tier authorisation
+      not currently held by JobyOperator.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 5 (CRITICAL) ──────────────────────────────────────────────────────
+  # JobyS4 has capacity = 4 passengers.
+  # Heavier passenger loads increase rotor disc loading and reduce crosswind
+  # tolerance.  The allowable wind ceiling scales as 1.5 m/s per empty seat
+  # (i.e., per unit of capacity).  Maximum safe wind = 1.5 × capacity m/s.
+  # 1.5 × 4 = 6.0 m/s.
+  # Weather1 has windSpeed = 10.0  →  10.0 > 6.0  →  VIOLATES.
+  #
+  # Why this is hard for document mode:
+  #   JobyS4 capacity (4) and Weather1 windSpeed (10.0) are in different
+  #   sections.  The vague rule says "weather conditions must not exceed
+  #   load-adjusted crosswind limits for the aircraft."  The LLM must
+  #   (a) retrieve capacity from the eVTOL description, (b) apply the
+  #   1.5 m/s/seat scaling factor (never mentioned in the document), and
+  #   (c) compare the derived 6.0 m/s ceiling to the reported wind speed.
+  - id: "compat-005"
+    name: "Wind Speed vs Passenger-Load Crosswind Tolerance"
+    subject_type: "eVTOL"             # JobyS4  (capacity = 4)
+    object_type:  "WeatherCondition"  # Weather1 (windSpeed = 10.0 m/s)
+    when:
+      attribute: "windSpeed"
+      operator:  ">"
+      value:     6.0              # 1.5 m/s × eVTOL.capacity = 1.5 × 4
+      unit:      "m/s"
+    consequence: "exceedsLoadAdjustedCrosswindLimitFor"
+    severity:    "critical"
+    note: >
+      Rotorcraft aerodynamics modelling (NASA TM-2022-220043) shows that for
+      current six-rotor eVTOL designs, allowable crosswind speed decreases by
+      approximately 1.5 m/s per additional passenger-seat because higher all-up
+      mass reduces lateral authority margin.  JobyS4 at 4 seats gives a ceiling
+      of 6.0 m/s.  Weather1 at 10.0 m/s is 4.0 m/s above this ceiling,
+      representing a structural and controllability risk.
+    plain_english: ""
+    expected_violated: true
+
+  # ── Rule 6 (INFO) — expected NO VIOLATION ─────────────────────────────────
+  # RouteA has distanceKm = 40.0 km.
+  # An eVTOL with range exceeding 5× the route distance is considered
+  # over-specified for the mission: excess range means excess battery mass,
+  # which reduces payload capacity and increases energy consumption per km.
+  # Maximum sensible range ceiling = 5 × 40.0 = 200.0 km.
+  # JobyS4 has rangeKm = 150.0  →  150.0 ≤ 200.0  →  NO VIOLATION.
+  #
+  # Why this is a useful comparison point:
+  #   The document states both figures (150 km range, 40 km route).  The
+  #   vague rule says "aircraft range must be proportionate to the assigned
+  #   route to avoid payload penalties."  A hallucinating LLM may incorrectly
+  #   flag a violation because 150 km "seems large" relative to 40 km —
+  #   but the 5× ceiling (200 km) makes it compliant.  Ontology mode reads
+  #   150 ≤ 200 and correctly reports no violation.
+  - id: "compat-006"
+    name: "eVTOL Range Upper Bound vs Route Proportionality"
+    subject_type: "FlightRoute"   # RouteA  (distanceKm = 40.0 km)
+    object_type:  "eVTOL"         # JobyS4  (rangeKm = 150.0 km)
+    when:
+      attribute: "rangeKm"
+      operator:  ">"
+      value:     200.0            # 5 × RouteA.distanceKm = 5 × 40.0
+      unit:      "km"
+    consequence: "oversizedRangeRelativeTo"
+    severity:    "info"
+    note: >
+      UAM fleet optimisation guidelines (ICAO Cir 328) flag aircraft as
+      over-specified when range exceeds 5× the planned route distance.
+      Excess battery mass beyond this ratio reduces payload by approximately
+      0.8 kg per 10 km of surplus range, degrading commercial viability.
+      RouteA is 40.0 km so the upper proportionality bound is 200.0 km.
+      JobyS4 at 150.0 km is well within this bound — no action required.
+    plain_english: ""
+    expected_violated: false

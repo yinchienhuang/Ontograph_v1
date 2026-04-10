@@ -53,7 +53,11 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 
-console = Console()
+import sys, io
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf-8-sig"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+console = Console(highlight=False)
 DATA = ROOT / "data"
 
 
@@ -110,8 +114,8 @@ def _show_flat_table(report) -> None:
 
     for vi in all_violations:
         sev_color   = _severity_color(vi.severity)
-        explanation = vi.explanation[:55] + "…" if len(vi.explanation) > 57 else vi.explanation
-        source_str  = vi.source_refs[0][:55] + "…" if vi.source_refs and len(vi.source_refs[0]) > 57 else (vi.source_refs[0] if vi.source_refs else "")
+        explanation = vi.explanation[:55] + "..." if len(vi.explanation) > 57 else vi.explanation
+        source_str  = vi.source_refs[0][:55] + "..." if vi.source_refs and len(vi.source_refs[0]) > 57 else (vi.source_refs[0] if vi.source_refs else "")
 
         table.add_row(
             vi.rule_id,
@@ -207,15 +211,15 @@ def _show_comparison(report, rules) -> None:
 
     def _agree_cell(cat: str) -> str:
         return {
-            "agree-both":    "[green]✓ both violated[/green]",
-            "agree-neither": "[green]✓ both clear[/green]",
-            "ont-only":      "[yellow]✗ ontology-only[/yellow]",
-            "doc-only":      "[yellow]✗ document-only[/yellow]",
+            "agree-both":    "[green]OK both violated[/green]",
+            "agree-neither": "[green]OK both clear[/green]",
+            "ont-only":      "[yellow]!! ontology-only[/yellow]",
+            "doc-only":      "[yellow]!! document-only[/yellow]",
         }[cat]
 
     for rule_id in all_rule_ids:
         rule     = rules_by_id.get(rule_id)
-        name     = (rule.name[:28] + "…") if rule and len(rule.name) > 30 else (rule.name if rule else rule_id)
+        name     = (rule.name[:28] + "...") if rule and len(rule.name) > 30 else (rule.name if rule else rule_id)
         severity = rule.severity if rule else "warning"
         sev_c    = _severity_color(severity)
         cat      = _agreement(rule_id)
@@ -295,17 +299,17 @@ def _show_comparison(report, rules) -> None:
                 if vi.source_refs:
                     for ref in vi.source_refs:
                         # Wrap long quotes for readability
-                        wrapped = (ref[:110] + "…") if len(ref) > 113 else ref
+                        wrapped = (ref[:110] + "...") if len(ref) > 113 else ref
                         console.print(f"    [dim]Source   :[/dim] [italic dim]\"{wrapped}\"[/italic dim]")
         else:
             console.print("\n  [bold]DOCUMENT[/bold]  [dim](LLM found no relevant content)[/dim]")
 
         # ── Agreement verdict ──────────────────────────────────────────────
         verdict = {
-            "agree-both":    "[green]✓ Both methods found violations[/green]",
-            "agree-neither": "[green]✓ Both methods: no violation detected[/green]",
-            "ont-only":      "[yellow]✗ Disagreement: ontology detected a violation — document did not[/yellow]",
-            "doc-only":      "[yellow]✗ Disagreement: document detected a violation — ontology did not[/yellow]",
+            "agree-both":    "[green]OK Both methods found violations[/green]",
+            "agree-neither": "[green]OK Both methods: no violation detected[/green]",
+            "ont-only":      "[yellow]!! Disagreement: ontology detected a violation - document did not[/yellow]",
+            "doc-only":      "[yellow]!! Disagreement: document detected a violation - ontology did not[/yellow]",
         }[cat]
         console.print(f"\n  {verdict}")
 
@@ -414,7 +418,7 @@ def main() -> None:
         rules = generate_all_plain_english(rules, provider)
         for rule in rules:
             snippet = rule.plain_english[:80]
-            console.print(f"  [dim]{rule.id}[/dim] → {snippet}{'…' if len(rule.plain_english) > 80 else ''}")
+            console.print(f"  [dim]{rule.id}[/dim] -> {snippet}{'...' if len(rule.plain_english) > 80 else ''}")
 
     # ── Run checks ────────────────────────────────────────────────────────────
     console.print()
@@ -438,6 +442,30 @@ def main() -> None:
         _show_comparison(report, rules)
     else:
         _show_flat_table(report)
+
+    # ── Token usage summary ───────────────────────────────────────────────────
+    console.print()
+    from rich.table import Table as RichTable
+    tok_table = RichTable(box=box.SIMPLE, show_header=True)
+    tok_table.add_column("Mode",     style="dim", no_wrap=True)
+    tok_table.add_column("Input",    justify="right")
+    tok_table.add_column("Output",   justify="right")
+    tok_table.add_column("Total",    justify="right")
+
+    ont = report.ontology_tokens
+    doc = report.document_tokens
+    if ont.total > 0:
+        tok_table.add_row("Ontology", str(ont.input_tokens), str(ont.output_tokens), f"[cyan]{ont.total}[/cyan]")
+    if doc.total > 0:
+        tok_table.add_row("Document", str(doc.input_tokens), str(doc.output_tokens), f"[cyan]{doc.total}[/cyan]")
+    if ont.total + doc.total > 0:
+        tok_table.add_row(
+            "[bold]Total[/bold]",
+            str(ont.input_tokens + doc.input_tokens),
+            str(ont.output_tokens + doc.output_tokens),
+            f"[bold cyan]{ont.total + doc.total}[/bold cyan]",
+        )
+        console.print(tok_table)
 
     # ── Save report ───────────────────────────────────────────────────────────
     viol_dir = DATA / "violations"

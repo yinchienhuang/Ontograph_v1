@@ -34,7 +34,7 @@ from rdflib import BNode, Graph, URIRef
 from rdflib.namespace import RDF
 
 from ontograph.llm import LLMMessage, LLMProvider, LLMRequest
-from ontograph.rules.schema import OrgRule, ViolationInstance, ViolationReport
+from ontograph.rules.schema import ModeTokenUsage, OrgRule, ViolationInstance, ViolationReport
 from ontograph.utils.owl import _SCHEMA_TYPES, load_graph
 
 
@@ -173,7 +173,7 @@ def _check_ontology_rule(
     rule: OrgRule,
     g: Graph,
     provider: LLMProvider,
-) -> list[ViolationInstance]:
+) -> tuple[list[ViolationInstance], ModeTokenUsage]:
     """Check one rule against OWL individual data via LLM."""
     ns = rule.namespace
 
@@ -192,7 +192,7 @@ def _check_ontology_rule(
         obj_inds = {}
 
     if not subj_inds and not obj_inds:
-        return []
+        return [], ModeTokenUsage()
 
     # ── Build prompt ─────────────────────────────────────────────────────────
     cond_entity = rule.object_type if rule.object_type else rule.subject_type or "entity"
@@ -255,6 +255,10 @@ def _check_ontology_rule(
     )
     response = provider.complete(request)
     check: RuleCheckResponse = response.parsed
+    usage = ModeTokenUsage(
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+    )
 
     # ── Build reverse label → props lookup for programmatic source extraction ──
     obj_by_label  = {_local_label(iri): props for iri, props in obj_inds.items()}
@@ -288,7 +292,7 @@ def _check_ontology_rule(
             explanation=pv.explanation,
             source_refs=source_refs,
         ))
-    return instances
+    return instances, usage
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +303,7 @@ def _check_document_rule(
     rule: OrgRule,
     document_text: str,
     provider: LLMProvider,
-) -> list[ViolationInstance]:
+) -> tuple[list[ViolationInstance], ModeTokenUsage]:
     """Check one rule against synthesized document text via LLM."""
     plain = rule.plain_english.strip()
     if not plain:
@@ -341,6 +345,10 @@ def _check_document_rule(
     )
     response = provider.complete(request)
     check: RuleCheckResponseWithSources = response.parsed
+    usage = ModeTokenUsage(
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+    )
 
     return [
         ViolationInstance(
@@ -355,7 +363,7 @@ def _check_document_rule(
             source_refs=pv.source_refs,
         )
         for pv in check.results
-    ]
+    ], usage
 
 
 # ---------------------------------------------------------------------------
@@ -408,15 +416,25 @@ def check_rules(
 
     # ── Run checks ────────────────────────────────────────────────────────────
     all_instances: list[ViolationInstance] = []
+    ont_tokens = ModeTokenUsage()
+    doc_tokens = ModeTokenUsage()
 
     for rule in rules:
         if needs_owl and g is not None:
-            instances = _check_ontology_rule(rule, g, provider)
+            instances, usage = _check_ontology_rule(rule, g, provider)
             all_instances.extend(instances)
+            ont_tokens = ModeTokenUsage(
+                input_tokens=ont_tokens.input_tokens + usage.input_tokens,
+                output_tokens=ont_tokens.output_tokens + usage.output_tokens,
+            )
 
         if needs_doc and doc_text is not None:
-            instances = _check_document_rule(rule, doc_text, provider)
+            instances, usage = _check_document_rule(rule, doc_text, provider)
             all_instances.extend(instances)
+            doc_tokens = ModeTokenUsage(
+                input_tokens=doc_tokens.input_tokens + usage.input_tokens,
+                output_tokens=doc_tokens.output_tokens + usage.output_tokens,
+            )
 
     # ── Build report ──────────────────────────────────────────────────────────
     report_id = hashlib.sha256(
@@ -431,4 +449,6 @@ def check_rules(
         document_path=str(document_path) if document_path else None,
         mode=mode,
         violations=all_instances,
+        ontology_tokens=ont_tokens,
+        document_tokens=doc_tokens,
     )

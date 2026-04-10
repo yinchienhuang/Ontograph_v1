@@ -77,6 +77,7 @@ def load_rules(path: str | Path) -> list[OrgRule]:
             severity=r.get("severity", "warning"),
             note=str(r.get("note") or "").strip(),
             plain_english=str(r.get("plain_english") or "").strip(),
+            expected_violated=bool(r.get("expected_violated", False)),
         )
         rules.append(rule)
 

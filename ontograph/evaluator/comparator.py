@@ -27,12 +27,39 @@ from rdflib import BNode, Graph, URIRef
 from rdflib.namespace import OWL, RDF
 
 from ontograph.evaluator.metrics import EvaluationReport, IndividualMetrics, TripleMetrics
+from ontograph.llm.base import LLMProvider
 from ontograph.utils.owl import _SCHEMA_TYPES, load_graph
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _detect_namespace(g: Graph) -> str | None:
+    """Return the dominant namespace of named individuals in *g*, or None.
+
+    Counts the namespace prefix shared by the most named individuals and returns
+    it if it accounts for at least half of all individuals (avoids returning an
+    irrelevant namespace when the graph mixes multiple ontologies).
+    """
+    from collections import Counter
+
+    counts: Counter[str] = Counter()
+    for s in g.subjects(RDF.type, OWL.NamedIndividual):
+        uri = str(s)
+        # Namespace is everything up to (and including) the last # or /
+        for sep in ("#", "/"):
+            idx = uri.rfind(sep)
+            if idx != -1:
+                counts[uri[: idx + 1]] += 1
+                break
+
+    if not counts:
+        return None
+    ns, top_count = counts.most_common(1)[0]
+    total = sum(counts.values())
+    return ns if top_count >= total / 2 else None
+
 
 def _f1(precision: float, recall: float) -> float:
     denom = precision + recall
@@ -76,14 +103,24 @@ def _subject_triples(g: Graph, individuals: set[str]) -> set[tuple[str, str, str
     """
     Return all non-blank-node triples from *g* whose subject is in *individuals*.
 
+    Structural declarations (``rdf:type owl:NamedIndividual``) are excluded —
+    they are present in every source OWL but never written by the pipeline,
+    so including them would uniformly penalise recall without measuring knowledge
+    reconstruction quality.
+
     Each triple is represented as a plain (subject, predicate, object) string
     tuple so set operations work correctly across graphs.
     """
+    _NAMED_IND = str(OWL.NamedIndividual)
+
     result: set[tuple[str, str, str]] = set()
     for ind_str in individuals:
         uri = URIRef(ind_str)
         for s, p, o in g.triples((uri, None, None)):
             if isinstance(o, BNode):
+                continue
+            # Skip structural owl:NamedIndividual declarations
+            if str(p) == str(RDF.type) and str(o) == _NAMED_IND:
                 continue
             result.add((str(s), str(p), str(o)))
     return result
@@ -97,6 +134,7 @@ def evaluate(
     source_owl: Path | str,
     working_owl: Path | str,
     fmt: str = "xml",
+    provider: LLMProvider | None = None,
 ) -> EvaluationReport:
     """
     Compare a working OWL file against a source (ground-truth) OWL.
@@ -116,6 +154,31 @@ def evaluate(
 
     src_g = load_graph(source_owl,  fmt=fmt)
     wrk_g = load_graph(working_owl, fmt=fmt)
+
+    # ── Optional cross-IRI alignment ──────────────────────────────────────
+    # When a provider is supplied, attempt to rename working individuals to
+    # match source IRI local names (e.g. "SerialPeripheralInterface" → "SPI").
+    # With provider=None (the default) this block is skipped entirely, so
+    # existing callers see no behaviour change.
+    if provider is not None:
+        namespace = _detect_namespace(src_g)
+        if namespace:
+            from ontograph.utils.iri_align import apply_iri_remap, cross_iri_align
+            # Use _abox_individuals (class-assertion aware) rather than looking for
+            # owl:NamedIndividual declarations — the pipeline never writes those.
+            src_locals = [
+                iri[len(namespace):]
+                for iri in _abox_individuals(src_g)
+                if iri.startswith(namespace)
+            ]
+            wrk_locals = [
+                iri[len(namespace):]
+                for iri in _abox_individuals(wrk_g)
+                if iri.startswith(namespace)
+            ]
+            mapping = cross_iri_align(wrk_locals, src_locals, provider)
+            if mapping:
+                wrk_g = apply_iri_remap(wrk_g, mapping, namespace)
 
     # ── Individual-level metrics ───────────────────────────────────────────
     src_inds       = _abox_individuals(src_g)

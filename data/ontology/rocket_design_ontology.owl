@@ -1,0 +1,267 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/rocket_large#"
+     xml:base="http://example.org/rocket_large"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+
+<owl:Ontology rdf:about="http://example.org/rocket_large"/>
+
+<!-- ===================== -->
+<!-- CLASSES -->
+<!-- ===================== -->
+
+<owl:Class rdf:about="#System"/>
+<owl:Class rdf:about="#Subsystem">
+    <rdfs:subClassOf rdf:resource="#System"/>
+</owl:Class>
+
+<owl:Class rdf:about="#Rocket">
+    <rdfs:subClassOf rdf:resource="#System"/>
+</owl:Class>
+
+<owl:Class rdf:about="#Stage">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+</owl:Class>
+
+<owl:Class rdf:about="#Engine">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+</owl:Class>
+
+<owl:Class rdf:about="#Tank">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+</owl:Class>
+
+<owl:Class rdf:about="#Avionics">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+</owl:Class>
+
+<owl:Class rdf:about="#PowerSystem">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+</owl:Class>
+
+<owl:Class rdf:about="#ThermalSystem">
+    <rdfs:subClassOf rdf:resource="#Subsystem"/>
+</owl:Class>
+
+<owl:Class rdf:about="#Interface"/>
+<owl:Class rdf:about="#Requirement"/>
+<owl:Class rdf:about="#Constraint"/>
+
+<!-- ===================== -->
+<!-- OBJECT PROPERTIES -->
+<!-- ===================== -->
+
+<owl:ObjectProperty rdf:about="#hasPart">
+    <rdfs:domain rdf:resource="#System"/>
+    <rdfs:range rdf:resource="#Subsystem"/>
+</owl:ObjectProperty>
+
+<owl:ObjectProperty rdf:about="#hasInterface">
+    <rdfs:domain rdf:resource="#Subsystem"/>
+    <rdfs:range rdf:resource="#Interface"/>
+</owl:ObjectProperty>
+
+<owl:ObjectProperty rdf:about="#connectedTo">
+    <rdfs:domain rdf:resource="#Interface"/>
+    <rdfs:range rdf:resource="#Interface"/>
+</owl:ObjectProperty>
+
+<owl:ObjectProperty rdf:about="#satisfies">
+    <rdfs:domain rdf:resource="#Subsystem"/>
+    <rdfs:range rdf:resource="#Requirement"/>
+</owl:ObjectProperty>
+
+<owl:ObjectProperty rdf:about="#hasConstraint">
+    <rdfs:domain rdf:resource="#System"/>
+    <rdfs:range rdf:resource="#Constraint"/>
+</owl:ObjectProperty>
+
+<!-- ===================== -->
+<!-- DATA PROPERTIES -->
+<!-- ===================== -->
+
+<owl:DatatypeProperty rdf:about="#massKg">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#thrustkN">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#powerW">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#heatLoad">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#maxMassAllowed">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#requiredThrust">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#maxPower">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#interfaceType">
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<!-- ===================== -->
+<!-- INDIVIDUALS -->
+<!-- ===================== -->
+
+<!-- Rocket -->
+<owl:NamedIndividual rdf:about="#RocketDemo">
+    <rdf:type rdf:resource="#Rocket"/>
+    <hasConstraint rdf:resource="#MassConstraint"/>
+    <hasConstraint rdf:resource="#PowerConstraint"/>
+    <hasConstraint rdf:resource="#ThrustRequirement"/>
+</owl:NamedIndividual>
+
+<!-- Constraints -->
+<owl:NamedIndividual rdf:about="#MassConstraint">
+    <rdf:type rdf:resource="#Constraint"/>
+    <maxMassAllowed rdf:datatype="http://www.w3.org/2001/XMLSchema#float">600000</maxMassAllowed>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#PowerConstraint">
+    <rdf:type rdf:resource="#Constraint"/>
+    <maxPower rdf:datatype="http://www.w3.org/2001/XMLSchema#float">8000</maxPower>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#ThrustRequirement">
+    <rdf:type rdf:resource="#Requirement"/>
+    <requiredThrust rdf:datatype="http://www.w3.org/2001/XMLSchema#float">2000</requiredThrust>
+</owl:NamedIndividual>
+
+<!-- Stages -->
+<owl:NamedIndividual rdf:about="#Stage1">
+    <rdf:type rdf:resource="#Stage"/>
+    <massKg rdf:datatype="http://www.w3.org/2001/XMLSchema#float">350000</massKg>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#Stage2">
+    <rdf:type rdf:resource="#Stage"/>
+    <massKg rdf:datatype="http://www.w3.org/2001/XMLSchema#float">280000</massKg>
+</owl:NamedIndividual>
+
+<!-- Engines -->
+<owl:NamedIndividual rdf:about="#EngineA">
+    <rdf:type rdf:resource="#Engine"/>
+    <thrustkN rdf:datatype="http://www.w3.org/2001/XMLSchema#float">800</thrustkN>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#EngineB">
+    <rdf:type rdf:resource="#Engine"/>
+    <thrustkN rdf:datatype="http://www.w3.org/2001/XMLSchema#float">750</thrustkN>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#EngineC">
+    <rdf:type rdf:resource="#Engine"/>
+    <thrustkN rdf:datatype="http://www.w3.org/2001/XMLSchema#float">300</thrustkN>
+</owl:NamedIndividual>
+
+<!-- Tanks -->
+<owl:NamedIndividual rdf:about="#Tank1">
+    <rdf:type rdf:resource="#Tank"/>
+    <massKg rdf:datatype="http://www.w3.org/2001/XMLSchema#float">100000</massKg>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#Tank2">
+    <rdf:type rdf:resource="#Tank"/>
+    <massKg rdf:datatype="http://www.w3.org/2001/XMLSchema#float">120000</massKg>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#Tank3">
+    <rdf:type rdf:resource="#Tank"/>
+    <massKg rdf:datatype="http://www.w3.org/2001/XMLSchema#float">90000</massKg>
+</owl:NamedIndividual>
+
+<!-- Avionics -->
+<owl:NamedIndividual rdf:about="#Avionics1">
+    <rdf:type rdf:resource="#Avionics"/>
+    <powerW rdf:datatype="http://www.w3.org/2001/XMLSchema#float">5000</powerW>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#Avionics2">
+    <rdf:type rdf:resource="#Avionics"/>
+    <powerW rdf:datatype="http://www.w3.org/2001/XMLSchema#float">4000</powerW>
+</owl:NamedIndividual>
+
+<!-- Power -->
+<owl:NamedIndividual rdf:about="#Battery1">
+    <rdf:type rdf:resource="#PowerSystem"/>
+    <powerW rdf:datatype="http://www.w3.org/2001/XMLSchema#float">3000</powerW>
+</owl:NamedIndividual>
+
+<!-- Thermal -->
+<owl:NamedIndividual rdf:about="#Thermal1">
+    <rdf:type rdf:resource="#ThermalSystem"/>
+    <heatLoad rdf:datatype="http://www.w3.org/2001/XMLSchema#float">12000</heatLoad>
+</owl:NamedIndividual>
+
+<!-- Interfaces -->
+<owl:NamedIndividual rdf:about="#InterfaceA">
+    <rdf:type rdf:resource="#Interface"/>
+    <interfaceType>analog</interfaceType>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#InterfaceB">
+    <rdf:type rdf:resource="#Interface"/>
+    <interfaceType>digital</interfaceType>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#InterfaceC">
+    <rdf:type rdf:resource="#Interface"/>
+    <interfaceType>digital</interfaceType>
+</owl:NamedIndividual>
+
+<!-- ===================== -->
+<!-- RELATIONSHIPS -->
+<!-- ===================== -->
+
+<owl:NamedIndividual rdf:about="#RocketDemo">
+    <hasPart rdf:resource="#Stage1"/>
+    <hasPart rdf:resource="#Stage2"/>
+    <hasPart rdf:resource="#EngineA"/>
+    <hasPart rdf:resource="#EngineB"/>
+    <hasPart rdf:resource="#EngineC"/>
+    <hasPart rdf:resource="#Tank1"/>
+    <hasPart rdf:resource="#Tank2"/>
+    <hasPart rdf:resource="#Tank3"/>
+    <hasPart rdf:resource="#Avionics1"/>
+    <hasPart rdf:resource="#Avionics2"/>
+    <hasPart rdf:resource="#Battery1"/>
+    <hasPart rdf:resource="#Thermal1"/>
+</owl:NamedIndividual>
+
+<!-- Interfaces -->
+<owl:NamedIndividual rdf:about="#EngineA">
+    <hasInterface rdf:resource="#InterfaceA"/>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#Avionics1">
+    <hasInterface rdf:resource="#InterfaceB"/>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#Avionics2">
+    <hasInterface rdf:resource="#InterfaceC"/>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#InterfaceA">
+    <connectedTo rdf:resource="#InterfaceB"/>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#InterfaceB">
+    <connectedTo rdf:resource="#InterfaceC"/>
+</owl:NamedIndividual>
+
+</rdf:RDF>

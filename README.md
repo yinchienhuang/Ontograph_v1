@@ -11,6 +11,7 @@ Three research comparisons are built in:
 | **Rule Checker** (`check_rules --mode both`) | Does exact OWL data help an LLM detect rule violations better than vague documentation prose? |
 | **Impact Analysis** (`analyze_impact --mode both`) | After a design change, does the updated ontology allow an LLM to correctly predict the new violation state vs. stale documents? |
 | **OWL Evaluator** (`run_pipeline --from-owl`) | How accurately does the pipeline reconstruct an existing ontology from a synthesized document (Recall / Precision / F1)? |
+| **Reconstruction** (`reconstruct --mode both`) | Does the structured onto-graph pipeline reconstruct triples more faithfully than a single-shot general-AI call on the raw document? |
 
 ---
 
@@ -105,6 +106,19 @@ three research comparisons immediately without ingesting any new documents.
     --auto-approve
 ```
 
+### 4 — Triple reconstruction comparison (onto-graph pipeline vs. single-shot AI)
+
+```bash
+.venv/Scripts/python scripts/reconstruct.py \
+    --owl      data/ontology/cubesatontology.owl \
+    --doc      data/raw/cubesatontology_synthesized.md \
+    --provider claude \
+    --mode     both
+```
+
+Both arms are scored against the source OWL (ground truth). The onto-graph arm runs the
+full chunked pipeline; the direct arm makes a single LLM call on the raw document text.
+
 ---
 
 ## Pipeline Steps
@@ -143,6 +157,7 @@ The main orchestrator is `scripts/run_pipeline.py`.
 |--------|-------------|
 | `scripts/check_rules.py` | Rule violation checker — ontology / document / both modes |
 | `scripts/analyze_impact.py` | Design-change impact analysis — scores each arm against ground truth |
+| `scripts/reconstruct.py` | Triple reconstruction — onto-graph pipeline vs. single-shot AI |
 | `scripts/review_delta.py` | Interactive human review of proposed OWL triples |
 | `scripts/align_delta.py` | Deduplicate entities in a delta file |
 | `scripts/apply_org_knowledge.py` | Inject organizational knowledge triples from YAML |
@@ -168,15 +183,75 @@ The main orchestrator is `scripts/run_pipeline.py`.
 
 ```
 ontograph/
-├── ingest/         Document loading, chunking, LLM extraction, OWL mapping, alignment
-├── llm/            Unified provider abstraction (Claude, GPT-4o, Gemini)
-├── models/         Pydantic v2 data contracts for all pipeline stages
-├── synthesizer/    OWL → grounded Markdown with provenance + self-check
-├── evaluator/      Source vs. working OWL: Recall / Precision / F1
-├── rules/          Structured YAML rules → LLM violation checker (ontology + document modes)
-├── impact/         Design-change impact analysis wrapping the rule checker
-└── utils/          Artifact I/O (content-addressed JSON), OWL / rdflib helpers
+├── ingest/          Document loading, chunking, LLM extraction, OWL mapping, alignment
+├── llm/             Unified provider abstraction (Claude, GPT-4o, Gemini)
+├── models/          Pydantic v2 data contracts for all pipeline stages
+├── synthesizer/     OWL → grounded Markdown with provenance + self-check
+├── evaluator/       Source vs. working OWL: Recall / Precision / F1
+├── rules/           Structured YAML rules → LLM violation checker (ontology + document modes)
+├── impact/          Design-change impact analysis wrapping the rule checker
+├── reconstruction/  Triple reconstruction comparison: onto-graph pipeline vs. single-shot AI
+└── utils/           Artifact I/O (content-addressed JSON), OWL / rdflib helpers
 ```
+
+---
+
+## Triple Reconstruction
+
+`scripts/reconstruct.py` answers: **does the structured onto-graph pipeline reconstruct
+triples more faithfully than asking a general-AI to extract them directly?**
+
+Two arms are run against the same document and scored by triple-level Precision / Recall / F1
+against the source OWL (ground truth):
+
+| Arm | Approach |
+|-----|----------|
+| **ontograph** | Full pipeline: load → chunk → extract → map → align → auto-approve → OWL |
+| **direct** | Single LLM call: raw document text + TBox vocabulary (class + property names) → triples |
+
+```bash
+# With a pre-synthesized document (fastest)
+.venv/Scripts/python scripts/reconstruct.py \
+    --owl  data/ontology/cubesatontology.owl \
+    --doc  data/raw/cubesatontology_synthesized.md \
+    --provider claude \
+    --mode both
+
+# Auto-synthesize the document from the OWL (slower; calls synthesizer first)
+.venv/Scripts/python scripts/reconstruct.py \
+    --owl  data/ontology/cubesatontology.owl \
+    --provider claude
+
+# Direct arm only
+.venv/Scripts/python scripts/reconstruct.py \
+    --owl  data/ontology/cubesatontology.owl \
+    --doc  data/raw/cubesatontology_synthesized.md \
+    --provider claude \
+    --mode direct
+```
+
+**Output:**
+
+```
+ Arm          Indiv P   Indiv R   Indiv F1   Triple P   Triple R   Triple F1
+ ontograph    91.0%     86.0%     88.4%      84.0%      78.0%      80.9%
+ direct       73.0%     65.0%     68.8%      61.0%      55.0%      57.8%
+
+Winner: ontograph  (triple F1: 80.9% vs 57.8%)
+```
+
+The `ReconstructionReport` is saved to `data/evaluations/` as JSON.
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--owl PATH` | *(required)* | Source OWL (ground truth, RDF/XML) |
+| `--doc PATH` | *(auto-synthesize)* | Pre-synthesized document — skips synthesizer step |
+| `--provider` | `claude` | LLM provider: `claude`, `gpt-4o`, `gemini` |
+| `--mode` | `both` | Which arm(s) to run: `ontograph`, `direct`, `both` |
+| `--namespace IRI` | *(auto-detect)* | Ontology namespace — inferred from OWL if omitted |
+| `--save-dir DIR` | `data/evaluations` | Where to save the JSON report |
 
 ---
 
@@ -225,7 +300,7 @@ scenarios:
 ## Running Tests
 
 ```bash
-.venv/Scripts/python -m pytest -q      # 451 tests, ~5 s
+.venv/Scripts/python -m pytest -q      # 527 tests, ~5 s
 ```
 
 ---

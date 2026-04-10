@@ -236,7 +236,7 @@ def step_extract_map(
 
     # Extract
     console.print(f"\n  Extracting entities from [cyan]{len(target_art.chunks)}[/cyan] chunks…")
-    bundle = extract(target_art, provider)
+    bundle = extract(target_art, provider, tbox=tbox)
     console.print(f"  Entities found : [cyan]{len(bundle.entities)}[/cyan]")
 
     bundle_path = save(bundle, DATA / "extractions")

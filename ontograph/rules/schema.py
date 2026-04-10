@@ -35,16 +35,17 @@ class OrgRule(BaseModel):
     (document mode).
     """
 
-    id:            str
-    name:          str
-    namespace:     str = ""            # resolved from YAML top-level namespace field
-    subject_type:  str | None = None   # OWL class local name; None = any subject
-    object_type:   str | None = None   # None = single-entity rule (no object pairing)
-    when:          RuleWhen
-    consequence:   str = ""
-    severity:      Literal["critical", "warning", "info"] = "warning"
-    note:          str = ""
-    plain_english: str = ""            # auto-generated vague description if blank
+    id:                str
+    name:              str
+    namespace:         str = ""            # resolved from YAML top-level namespace field
+    subject_type:      str | None = None   # OWL class local name; None = any subject
+    object_type:       str | None = None   # None = single-entity rule (no object pairing)
+    when:              RuleWhen
+    consequence:       str = ""
+    severity:          Literal["critical", "warning", "info"] = "warning"
+    note:              str = ""
+    plain_english:     str = ""            # auto-generated vague description if blank
+    expected_violated: bool = False        # deterministic ground truth — set in YAML
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +77,16 @@ class ViolationInstance(BaseModel):
     )
 
 
+class ModeTokenUsage(BaseModel):
+    """Token counts for one checking mode (ontology or document)."""
+    input_tokens:  int = 0
+    output_tokens: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
 class ViolationReport(BaseModel):
     """
     Full violation check report produced by check_rules().
@@ -91,6 +102,8 @@ class ViolationReport(BaseModel):
     document_path: str | None = None
     mode:          str
     violations:    list[ViolationInstance]
+    ontology_tokens: ModeTokenUsage = Field(default_factory=ModeTokenUsage)
+    document_tokens: ModeTokenUsage = Field(default_factory=ModeTokenUsage)
 
     def critical(self) -> list[ViolationInstance]:
         """Return only instances where violated=True (actual rule violations)."""
@@ -99,3 +112,37 @@ class ViolationReport(BaseModel):
     def by_rule(self, rule_id: str) -> list[ViolationInstance]:
         """Return all ViolationInstances for a specific rule_id."""
         return [v for v in self.violations if v.rule_id == rule_id]
+
+
+# ---------------------------------------------------------------------------
+# Conflict scoring models
+# ---------------------------------------------------------------------------
+
+class RuleScore(BaseModel):
+    """Scoring outcome for one rule against one detection arm."""
+
+    rule_id:                str
+    rule_name:              str
+    severity:               Literal["critical", "warning", "info"]
+    gt_violated:            bool
+    detected:               bool
+    match_score:            float = 0.0
+    matched_conflict_index: int | None = None
+    outcome:                Literal["TP", "FP", "FN", "TN"]
+
+
+class ConflictScoreReport(BaseModel):
+    """P/R/F1 evaluation of both conflict-detection arms against ground truth."""
+
+    model_config = {"protected_namespaces": ()}
+
+    ontograph_precision: float
+    ontograph_recall:    float
+    ontograph_f1:        float
+    direct_precision:    float
+    direct_recall:       float
+    direct_f1:           float
+    ontograph_tokens:    dict[str, int]   # {"input": N, "output": M}
+    direct_tokens:       dict[str, int]
+    per_rule_ontograph:  list[RuleScore]
+    per_rule_direct:     list[RuleScore]
